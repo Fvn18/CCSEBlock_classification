@@ -188,7 +188,7 @@ def ccse_resnet152(num_classes=1000, input_channels=3):
     """Constructs a CCSE-ResNet-152 model."""
     return CCSE_ResNet(CCSEBottleneck, [3, 8, 36, 3], num_classes=num_classes, input_channels=input_channels)
 
-CCSE_ResNet = CCSEResNet
+CCSEResNet = CCSE_ResNet
 
 if __name__ == "__main__":
 
