@@ -1,10 +1,10 @@
-# CCSEBlock Classification
+# CrossChannelSegmentationExcitationBlock Classification
 
-This repository implements CCSEBlock (Channel-wise Cross Spatial Excitation) and various neural network architectures for image classification tasks. The project includes comprehensive experiments on multiple datasets including FER2013 emotion recognition, CIFAR-10, and CIFAR-100.
+This repository implements CrossChannelSegmentationExcitationBlock (CCSE) and various neural network architectures for image classification tasks. The project includes comprehensive experiments on multiple datasets including FER2013 emotion recognition, CIFAR-10, and CIFAR-100.
 
 ## Features
 
-- **CCSEBlock Implementation**: Novel attention mechanism for enhancing spatial and channel-wise feature interactions
+- **CrossChannelSegmentationExcitationBlock Implementation**: Novel attention mechanism for enhancing spatial and channel-wise feature interactions through cross-channel segmentation and excitation
 - **Multiple Model Architectures**:
   - CCSE-ResNet variants (ResNet18, 34, 50, 101, 152)
   - SE-ResNet variants with Squeeze-and-Excitation blocks
@@ -32,16 +32,16 @@ The project supports multiple datasets:
 
 ## Model Architectures
 
-### CCSEBlock
-Core attention mechanism that enhances both spatial and channel dimensions through cross-modal excitation, providing better feature representation learning.
+### CrossChannelSegmentationExcitationBlock (CCSE)
+Core attention mechanism that enhances both spatial and channel dimensions through cross-channel segmentation and excitation, providing better feature representation learning by dividing channels into even and odd groups and applying cross-excitation between them.
 
 ### ResNet Variants with CCSE
-- **CCSE-ResNet18/34/50/101/152**: ResNet architectures enhanced with CCSE blocks
+- **CCSE-ResNet18/34/50/101/152**: ResNet architectures enhanced with CrossChannelSegmentationExcitationBlock
 - Superior performance compared to standard ResNet and SE-ResNet on various tasks
 
 ### ExtraNet Series
 - **ExtraNet**: Base architecture with efficient residual connections
-- **ExtraNet_CCSE**: Enhanced with CCSE blocks for better feature extraction
+- **ExtraNet_CCSE**: Enhanced with CrossChannelSegmentationExcitationBlock for better feature extraction
 - **ExtraNet_CCSE_Lite**: Lightweight version optimized for mobile deployment
 - **ExtraNet_Scalable**: Configurable model sizes from pico (minimal) to large (comprehensive)
 
@@ -123,9 +123,9 @@ python utiles/model_benchmark.py
 
 ## Key Components
 
-### CCSEBlock Implementation (`model/CCSEBlock.py`)
-- Channel-wise Cross Spatial Excitation mechanism
-- Efficient attention computation
+### CrossChannelSegmentationExcitationBlock Implementation (`model/CCSEBlock.py`)
+- Cross-Channel Segmentation and Excitation mechanism
+- Efficient attention computation through channel segmentation
 - Compatible with any CNN architecture
 
 ### Training Features
@@ -164,8 +164,8 @@ CCSEBlock_classification/
 ├── train.py                # Main training script
 ├── utils.py                # Utility functions
 ├── model/                  # Model architectures
-│   ├── CCSEBlock.py        # CCSE attention mechanism
-│   ├── CCSE_ResNet.py      # CCSE-enhanced ResNet
+│   ├── CCSEBlock.py        # CrossChannelSegmentationExcitationBlock implementation
+│   ├── CCSE_ResNet.py      # CCSE-enhanced ResNet variants
 │   ├── SE_ResNet.py        # SE-ResNet baselines
 │   ├── ExtraNet*.py        # ExtraNet variants
 │   └── __init__.py
@@ -201,8 +201,8 @@ We welcome contributions! Please follow these guidelines:
 If you use this code in your research, please cite:
 
 ```bibtex
-@misc{ccseblock2024,
-  title={CCSEBlock: Channel-wise Cross Spatial Excitation for Image Classification},
+@misc{crosschannelsegmentationexcitation2024,
+  title={CrossChannelSegmentationExcitationBlock: Cross-Channel Segmentation and Excitation for Image Classification},
   author={Fu Bin},
   year={2024},
   publisher={GitHub},
