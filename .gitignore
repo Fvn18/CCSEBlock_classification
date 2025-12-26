@@ -1,0 +1,130 @@
+# CCSEBlock Classification Project .gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
+.nova/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Project specific
+# Model checkpoints and results
+results/
+*.pth
+*.pkl
+*.h5
+*.ckpt
+
+# Logs
+*.log
+training.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# CUDA and GPU
+*.ptx
+*.cubin
+
+# Dataset files (large files should not be committed)
+data/
+*.csv
+*.json
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tiff
+*.tif
+
+# Configuration files that may contain sensitive data
+config.local.yaml
+config.local.yml
+secrets.yaml
+secrets.yml
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# Utilities directory - keep important scripts but ignore generated files
+# utiles/  # Commented out to include utility scripts
+
+# Model benchmarking and testing
+benchmark_results/
+test_outputs/
