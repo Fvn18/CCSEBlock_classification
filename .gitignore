@@ -1,10 +1,12 @@
-# CCSEBlock Classification Project .gitignore
-
-# Python
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
+
+# C extensions
 *.so
+
+# Distribution / packaging
 .Python
 build/
 develop-eggs/
@@ -34,7 +36,6 @@ pip-delete-this-directory.txt
 # Unit test / coverage reports
 htmlcov/
 .tox/
-.nox/
 .coverage
 .coverage.*
 .cache
@@ -44,7 +45,41 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 
-# Virtual environments
+# Translations
+*.mo
+*.pot
+
+# Django stuff:
+*.log
+local_settings.py
+db.sqlite3
+
+# Flask stuff:
+instance/
+.webassets-cache
+
+# Scrapy stuff:
+.scrapy
+
+# Sphinx documentation
+docs/_build/
+
+# PyBuilder
+target/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# celery beat schedule file
+celerybeat-schedule
+
+# SageMath parsed files
+*.sage.py
+
+# Environments
 .env
 .venv
 env/
@@ -53,17 +88,41 @@ ENV/
 env.bak/
 venv.bak/
 
-# IDE and Editor files
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# Project specific
+# Data directories (usually large) - uncomment if you want to include sample data
+data/
+results/
+*.pth
+*.pkl
+*.h5
+*.csv
+*.json
+
+# IDE
 .vscode/
 .idea/
 *.swp
 *.swo
-*~
-*.sublime-project
-*.sublime-workspace
-.nova/
 
-# OS generated files
+# OS
 .DS_Store
 .DS_Store?
 ._*
@@ -71,59 +130,11 @@ venv.bak/
 .Trashes
 ehthumbs.db
 Thumbs.db
-desktop.ini
-
-# Project specific
-# Model checkpoints and results
-results/
-*.pth
-*.pkl
-*.h5
-*.ckpt
 
 # Logs
 *.log
-training.log
 logs/
 
 # Temporary files
-tmp/
-temp/
 *.tmp
 *.temp
-
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# CUDA and GPU
-*.ptx
-*.cubin
-
-# Dataset files (large files should not be committed)
-data/
-*.csv
-*.json
-*.png
-*.jpg
-*.jpeg
-*.gif
-*.bmp
-*.tiff
-*.tif
-
-# Configuration files that may contain sensitive data
-config.local.yaml
-config.local.yml
-secrets.yaml
-secrets.yml
-
-# Backup files
-*.bak
-*.backup
-*~
-
-
-
-# Model benchmarking and testing
-benchmark_results/
-test_outputs/

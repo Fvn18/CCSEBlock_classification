@@ -79,6 +79,12 @@ class FocalLoss(nn.Module):
         logpt = F.log_softmax(inputs, dim=1)
         pt = logpt.exp()
 
+        if inputs.dim() > 2:
+            inputs = inputs.view(inputs.size(0), inputs.size(1), -1)
+            inputs = inputs.transpose(1, 2)
+            inputs = inputs.contiguous().view(-1, inputs.size(2))
+            target = target.view(-1)
+
         target = target.unsqueeze(1) if target.dim() == 1 else target
         pt = pt.gather(1, target).squeeze(1)
         logpt = logpt.gather(1, target).squeeze(1)
@@ -88,7 +94,7 @@ class FocalLoss(nn.Module):
         if self.alpha is not None:
             if self.alpha.device != loss.device:
                 self.alpha = self.alpha.to(loss.device)
-            alpha_t = self.alpha.gather(0, target.squeeze(1))
+            alpha_t = self.alpha.gather(0, target.squeeze(1) if target.dim() > 1 else target)
             loss = alpha_t * loss
 
         if self.reduction == 'mean':
@@ -145,7 +151,7 @@ class SymmetricCrossEntropy(nn.Module):
         label_one_hot = F.one_hot(labels, self.num_classes).float().to(pred.device)
         label_one_hot = torch.clamp(label_one_hot, min=1e-4, max=1.0)
 
-        rce = -torch.sum(pred_softmax * torch.log(label_one_hot), dim=1)
+        rce = -torch.sum(pred_softmax * torch.log(label_one_hot + 1e-7), dim=1)
 
         loss = self.alpha * ce + self.beta * rce.mean()
         return loss
@@ -177,11 +183,15 @@ class KLLabelSmoothingLoss(nn.Module):
 
         smoothed = smooth_one_hots(targets, classes=self.classes, smoothing=self.smoothing)
         log_probs = F.log_softmax(outputs, dim=1)
-        loss = F.kl_div(log_probs, smoothed, reduction='batchmean')
+        loss = F.kl_div(log_probs, smoothed, reduction='batchmean' if self.reduction == 'mean' else 'sum')
 
         if self.reduction == 'sum':
-            return loss * outputs.size(0)
-        return loss
+            return loss
+        elif self.reduction == 'mean':
+            return loss
+        else:
+            batch_size = outputs.size(0)
+            return loss * batch_size
 
 
 def mixup_data(x: Tensor, y: Tensor, alpha: float = 0.2, device: Optional[str] = None, generator: Optional[torch.Generator] = None) -> Tuple[Tensor, Tensor, Tensor, float]:

@@ -11,7 +11,7 @@ This repository implements CrossChannelSegmentationExcitationBlock (CCSE) and va
   - ExtraNet series with CCSE enhancement
   - Scalable ExtraNet architectures (pico, nano, micro, tiny, small, medium, large)
 - **Advanced Training Strategies**: Mixup, CutMix, Test-Time Augmentation (TTA)
-- **Loss Functions**: Symmetric Cross Entropy (SCE), Focal Loss, Generalized Cross Entropy (GCE)
+- **Loss Functions**: Symmetric Cross Entropy (SCE), Focal Loss, Generalized Cross Entropy (GCE), and more
 - **Data Augmentation**: Comprehensive pipeline with geometric and color transformations
 - **Performance Optimization**: Automatic Mixed Precision (AMP) and PyTorch compilation
 - **Experiment Tracking**: Automated logging, visualization, and model checkpointing
@@ -55,14 +55,13 @@ Core attention mechanism that enhances both spatial and channel dimensions throu
 ### Setup
 1. Clone the repository:
 ```bash
-git clone https://github.com/Fvn18/CCSEBlock_classification.git
+git clone https://github.com/yourusername/CCSEBlock_classification.git
 cd CCSEBlock_classification
 ```
 
 2. Install dependencies:
 ```bash
-pip install torch torchvision torchaudio
-pip install numpy matplotlib seaborn scikit-learn tqdm pyyaml pillow
+pip install -r requirements.txt
 ```
 
 3. (Optional) For development:
@@ -129,7 +128,7 @@ python utiles/model_benchmark.py
 - Compatible with any CNN architecture
 
 ### Training Features
-- **Advanced Loss Functions**: SCE for noisy labels, Focal Loss for class imbalance
+- **Advanced Loss Functions**: SCE for noisy labels, Focal Loss for class imbalance, GCE, and more
 - **Data Augmentation**: Random erasing, Gaussian blur, affine transformations
 - **Class Balancing**: Automatic class weight calculation for imbalanced datasets
 - **Early Stopping**: Prevents overfitting with configurable patience
@@ -141,19 +140,6 @@ python utiles/model_benchmark.py
 - Training history plots (loss and accuracy curves)
 - Classification reports with detailed statistics
 
-## Experiment Results
-
-Results are automatically saved in the `results/` directory with timestamps. Each experiment includes:
-- Model checkpoints (*.pth files)
-- Training logs and metrics
-- Visualization plots (confusion matrices, training curves)
-- Configuration files for reproducibility
-
-### Performance Highlights
-- CCSE-enhanced models consistently outperform baseline architectures
-- ExtraNet_CCSE variants show excellent efficiency-accuracy trade-offs
-- Scalable ExtraNet provides flexible deployment options
-
 ## Project Structure
 
 ```
@@ -162,7 +148,8 @@ CCSEBlock_classification/
 ├── config.yaml              # Experiment configurations
 ├── dataset.py               # Dataset loading and preprocessing
 ├── train.py                # Main training script
-├── utils.py                # Utility functions
+├── utils.py                # Utility functions and loss functions
+├── requirements.txt         # Python dependencies
 ├── model/                  # Model architectures
 │   ├── CCSEBlock.py        # CrossChannelSegmentationExcitationBlock implementation
 │   ├── CCSE_ResNet.py      # CCSE-enhanced ResNet variants
@@ -171,11 +158,13 @@ CCSEBlock_classification/
 │   └── __init__.py
 ├── utiles/                 # Utility scripts
 │   ├── model_benchmark.py  # Architecture benchmarking
-│   ├── loss.py            # Custom loss functions
+│   ├── loss.py            # Additional loss functions
 │   ├── calculate_class_weights.py
 │   └── check_model_type.py
 ├── data/                   # Datasets (not included in repo)
-├── results/               # Experiment outputs
+├── results/               # Experiment outputs (not included in repo)
+├── .gitignore             # Git ignore rules
+├── LICENSE                # License file
 └── README.md
 ```
 
@@ -206,7 +195,8 @@ If you use this code in your research, please cite:
   author={Fu Bin},
   year={2024},
   publisher={GitHub},
-  url={https://github.com/Fvn18/CCSEBlock_classification}
+  journal={GitHub repository},
+  url={https://github.com/yourusername/CCSEBlock_classification}
 }
 ```
 

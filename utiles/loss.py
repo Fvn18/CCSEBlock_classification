@@ -34,7 +34,7 @@ class CrossEntropy(torch.nn.Module):
         ce = self.ce(pred, labels)
         return ce
 
-class RevserseCrossEntropy(torch.nn.Module):
+class ReverseCrossEntropy(torch.nn.Module):
     def __init__(self, num_classes) -> None:
         super().__init__()
         self.num_classes = num_classes
@@ -92,7 +92,7 @@ class NormalizedCrossEntropy(torch.nn.Module):
     def forward(self, pred, labels):
         pred = F.log_softmax(pred, dim=1)
         label_one_hot = F.one_hot(labels, self.num_classes).float().to(pred.device)
-        nce = -1 * torch.sum(label_one_hot * pred, dim=1) / (- pred.sum(dim=1))
+        nce = -torch.sum(label_one_hot * pred, dim=1) / torch.sum(pred, dim=1)
         return nce.mean()
     
 class NormalizedNegativeCrossEntropy(torch.nn.Module):
@@ -105,8 +105,8 @@ class NormalizedNegativeCrossEntropy(torch.nn.Module):
     def forward(self, pred, labels):
         pred = F.softmax(pred, dim=1)
         pred = pred.clamp(min=self.min_prob, max=1)
-        pred = self.A + pred.log() # - log(1e-7) - (- log(p(k|x)))
-        label_one_hot = F.one_hot(labels, self.num_classes).to(pred.device)
+        pred = self.A + pred.log()  # -log(min_prob) - (-log(p(k|x)))
+        label_one_hot = F.one_hot(labels, self.num_classes).float().to(pred.device)
         nnce = 1 - (label_one_hot * pred).sum(dim=1) / pred.sum(dim=1)
         return nnce.mean()
 
@@ -124,9 +124,9 @@ class FocalLoss(torch.nn.Module):
 
     def forward(self, input, target):
         if input.dim() > 2:
-            input = input.view(input.size(0), input.size(1), -1)  # N,C,H,W => N,C,H*W
-            input = input.transpose(1, 2)                         # N,C,H*W => N,H*W,C
-            input = input.contiguous().view(-1, input.size(2))    # N,H*W,C => N*H*W,C
+            input = input.view(input.size(0), input.size(1), -1)  
+            input = input.transpose(1, 2)                         
+            input = input.contiguous().view(-1, input.size(2))    
         target = target.view(-1, 1)
 
         logpt = F.log_softmax(input, dim=1)
@@ -180,7 +180,7 @@ class NormalizedNegativeFocalLoss(torch.nn.Module):
         normalizor = torch.sum(-1 * (1 - logpt.data.exp()) ** self.gamma * logpt, dim=1)
         logpt = logpt.gather(1, target)
         logpt = logpt.view(-1)
-        pt = torch.autograd.Variable(logpt.data.exp())
+        pt = logpt.data.exp()
         loss = -1 * (1-pt)**self.gamma * logpt
         loss = 1 - (self.A - loss) / (self.num_classes * self.A - normalizor)
         return loss.mean()
@@ -330,7 +330,7 @@ def ce():
     return CrossEntropy()
 
 def rce(num_classes):
-    return RevserseCrossEntropy(num_classes)
+    return ReverseCrossEntropy(num_classes)
 
 def nce(num_classes):
     return NormalizedCrossEntropy(num_classes)
