@@ -196,7 +196,7 @@ If you use this code in your research, please cite:
   year={2024},
   publisher={GitHub},
   journal={GitHub repository},
-  url={https://github.com/yourusername/CCSEBlock_classification}
+  url={https://github.com/Fvn18/CCSEBlock_classification}
 }
 ```
 
