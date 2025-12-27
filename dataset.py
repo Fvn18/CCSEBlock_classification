@@ -7,7 +7,7 @@ from torchvision.transforms import functional as F
 from utils import worker_init_fn
 
 
-class FER2013DataLoader:
+class GenericDataLoader:
     def __init__(self, config=None):
         self.config = config or {}
         get = self.config.get
@@ -169,5 +169,5 @@ class FER2013DataLoader:
         return data_loader
 
 def load_data(path, batch_size, num_workers, mode, config=None):
-    loader = FER2013DataLoader(config=config)
+    loader = GenericDataLoader(config=config)
     return loader.get_loader(path, batch_size, num_workers, mode)
