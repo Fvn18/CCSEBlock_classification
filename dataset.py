@@ -71,10 +71,11 @@ class GenericDataLoader:
         
         if mode == "train":
             if use_grayscale:
-                grayscale_channels = get('grayscale_output_channels', 1)  
+                grayscale_channels = get('grayscale_output_channels', 1)
                 base_transforms = [
                     transforms.Grayscale(num_output_channels=grayscale_channels),
                     transforms.Resize(self.resize_size),
+                    transforms.RandomCrop(self.crop_size, padding=4),
                     transforms.RandomHorizontalFlip(p=self.horizontal_flip_prob),
                     transforms.RandomRotation(degrees=self.random_rotation_degrees),
                 ]
@@ -82,12 +83,13 @@ class GenericDataLoader:
 
                 base_transforms = [
                     transforms.Resize(self.resize_size),
+                    transforms.RandomCrop(self.crop_size, padding=4),
                     transforms.RandomHorizontalFlip(p=self.horizontal_flip_prob),
                     transforms.RandomRotation(degrees=self.random_rotation_degrees),
                 ]
             
             if get('use_randaugment', False):
-                base_transforms.append(RandAugment(num_ops=get('randaugment_n', 2), magnitude=get('randaugment_m', 10)))
+                base_transforms.append(RandAugment(num_ops=get('randaugment_n', 2), magnitude=get('randaugment_m', 10), generator=self.generator))
             else:
                 base_transforms.extend([
                     transforms.RandomApply([
