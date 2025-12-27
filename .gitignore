@@ -122,8 +122,7 @@ secrets.yml
 *.backup
 *~
 
-# Utilities directory - keep important scripts but ignore generated files
-# utiles/  # Commented out to include utility scripts
+
 
 # Model benchmarking and testing
 benchmark_results/

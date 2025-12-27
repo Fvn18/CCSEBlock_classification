@@ -1,12 +1,12 @@
 basic:
-  dataset: "fer2013"
+  dataset: "cifar10"
   device: "auto"
   num_workers: 8
   seed: 42
   use_amp: true
 
 model:
-  name: "se_resnet18"
+  name: "se_resnet50"
   scalable_model_scale: "pico"
   use_torch_compile: false
 
@@ -15,35 +15,36 @@ data:
   train_path: "./data/cifar10/train"
   val_path: "./data/cifar10/test"
   test_path: "./data/cifar10/test"
-  grayscale_output_channels: 1  
+  grayscale_output_channels: 3  
 
 augmentation:
   use_tta: true
-  tta_angles: [7.5, -7.5, 4.0, -4.0]
-  resize_size: 48
+  tta_angles: [5.0, -5.0, 2.5, -2.5]
+  resize_size: 40
   crop_size: 32
   horizontal_flip_prob: 0.5
-  random_rotation_degrees: 10
-  random_erasing_prob: 0.25
-  color_jitter_prob: 0.0
-  random_affine_prob: 0.25
-  gaussian_blur_prob: 0.15
+  random_rotation_degrees: 15
+  random_erasing_prob: 0.3
+  color_jitter_prob: 0.8
   color_jitter_brightness: 0.2
   color_jitter_contrast: 0.2
   color_jitter_saturation: 0.1
+  color_jitter_hue: 0.1
+  random_affine_prob: 0.3
+  gaussian_blur_prob: 0.1
   random_affine_translate: [0.1, 0.1]
   random_affine_scale: [0.9, 1.1]
-  gaussian_blur_sigma: [0.1, 0.9]
+  gaussian_blur_sigma: [0.1, 0.5]
   use_randaugment: false
   randaugment_n: 2
   randaugment_m: 8
 
 training:
   batch_size: 128
-  epochs: 1
-  lr: 0.00055
-  weight_decay: 0.03
-  patience: 999
+  epochs: 200
+  lr: 0.001
+  weight_decay: 0.01
+  patience: 30
   gradient_clip: 1.0
 
 optimizer:
@@ -53,34 +54,34 @@ optimizer:
 
 scheduler:
   name: "cosine"
-  switch_to_plateau_epoch: 999
+  switch_to_plateau_epoch: 150
   use_warmup: true
-  warmup_epochs: 15
-  cosine_t_max: 400
-  cosine_eta_min: 8e-07
+  warmup_epochs: 5
+  cosine_t_max: 200
+  cosine_eta_min: 1e-06
   cosine_T_mult: 1.0
-  step_size: 25
+  step_size: 50
   gamma: 0.1
-  plateau_patience: 12
-  plateau_factor: 0.1
+  plateau_patience: 10
+  plateau_factor: 0.5
 
 loss:
   type: "sce"
-  sce_alpha: 1.5
+  sce_alpha: 1.0
   sce_beta: 1.0
-  sce_ce_only_epochs: 8
+  sce_ce_only_epochs: 5
   focal_gamma: 2.0
-  gce_q: 0.8
-  label_smoothing: 0.1
+  gce_q: 0.7
+  label_smoothing: 0.05
   dynamic_label_smoothing: false
 
 strategies:
-  mixup_alpha: 0.25
-  mixup_prob: 0.45
-  cutmix_alpha: 0.9
-  cutmix_prob: 0.35
+  mixup_alpha: 0.8
+  mixup_prob: 0.5
+  cutmix_alpha: 1.0
+  cutmix_prob: 0.5
   use_class_weights: false
-  class_weights: [1.4, 4.5, 1.3, 1.1, 1.2, 1.3, 1.5]
+  class_weights: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
 
 logging:
   save_checkpoints: false
@@ -89,5 +90,5 @@ logging:
   save_best_only: true
 
 normalization:
-  mean: [0.5]
-  std: [0.5]
+  mean: [0.4914, 0.4822, 0.4465]
+  std: [0.2023, 0.1994, 0.2010]

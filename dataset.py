@@ -12,6 +12,7 @@ class FER2013DataLoader:
         self.config = config or {}
         get = self.config.get
         
+        self.dataset_name = get('dataset', 'fer2013') 
         self.horizontal_flip_prob = get('horizontal_flip_prob', 0.6)
         self.random_rotation_degrees = get('random_rotation_degrees', 20)
         self.random_erasing_prob = get('random_erasing_prob', 0.07)
@@ -26,8 +27,9 @@ class FER2013DataLoader:
         self.random_affine_translate = get('random_affine_translate', (0.12, 0.12))
         self.random_affine_scale = get('random_affine_scale', (0.92, 1.08))
         self.gaussian_blur_sigma = get('gaussian_blur_sigma', (0.1, 0.4))
-        self.mean = (0.5,)
-        self.std = (0.5,)
+
+        self.mean = get('mean', [0.5])
+        self.std = get('std', [0.5])
         
         self.use_tta = get('use_tta', False)
         self.tta_angles = get('tta_angles', [5.0, -5.0, 2.5, -2.5])
@@ -65,14 +67,25 @@ class FER2013DataLoader:
     def _build_transform(self, mode):
         get = self.config.get
 
+        use_grayscale = self.dataset_name.lower() in ['fer2013', 'fer2013_new']
+        
         if mode == "train":
-            grayscale_channels = get('grayscale_output_channels', 1)  
-            base_transforms = [
-                transforms.Grayscale(num_output_channels=grayscale_channels),
-                transforms.Resize(self.resize_size),
-                transforms.RandomHorizontalFlip(p=self.horizontal_flip_prob),
-                transforms.RandomRotation(degrees=self.random_rotation_degrees),
-            ]
+            if use_grayscale:
+                grayscale_channels = get('grayscale_output_channels', 1)  
+                base_transforms = [
+                    transforms.Grayscale(num_output_channels=grayscale_channels),
+                    transforms.Resize(self.resize_size),
+                    transforms.RandomHorizontalFlip(p=self.horizontal_flip_prob),
+                    transforms.RandomRotation(degrees=self.random_rotation_degrees),
+                ]
+            else:
+
+                base_transforms = [
+                    transforms.Resize(self.resize_size),
+                    transforms.RandomHorizontalFlip(p=self.horizontal_flip_prob),
+                    transforms.RandomRotation(degrees=self.random_rotation_degrees),
+                ]
+            
             if get('use_randaugment', False):
                 base_transforms.append(RandAugment(num_ops=get('randaugment_n', 2), magnitude=get('randaugment_m', 10)))
             else:
@@ -100,21 +113,35 @@ class FER2013DataLoader:
             ])
             transform = transforms.Compose(base_transforms)
         else:
-            grayscale_channels = get('grayscale_output_channels', 1)  
-            if get('use_tta', False):
-                transform = transforms.Compose([
-                    transforms.Grayscale(num_output_channels=grayscale_channels),
-                    transforms.Resize(self.resize_size),
-                    transforms.TenCrop(self.crop_size),
-                    transforms.Lambda(self._stack_crops_tta),
-                ])
+            if use_grayscale:
+                grayscale_channels = get('grayscale_output_channels', 1)  
+                if get('use_tta', False):
+                    transform = transforms.Compose([
+                        transforms.Grayscale(num_output_channels=grayscale_channels),
+                        transforms.Resize(self.resize_size),
+                        transforms.TenCrop(self.crop_size),
+                        transforms.Lambda(self._stack_crops_tta),
+                    ])
+                else:
+                    transform = transforms.Compose([
+                        transforms.Grayscale(num_output_channels=grayscale_channels),
+                        transforms.Resize(self.resize_size),
+                        transforms.TenCrop(self.crop_size),
+                        transforms.Lambda(self._stack_crops_test),
+                    ])
             else:
-                transform = transforms.Compose([
-                    transforms.Grayscale(num_output_channels=grayscale_channels),
-                    transforms.Resize(self.resize_size),
-                    transforms.TenCrop(self.crop_size),
-                    transforms.Lambda(self._stack_crops_test),
-                ])
+                if get('use_tta', False):
+                    transform = transforms.Compose([
+                        transforms.Resize(self.resize_size),
+                        transforms.TenCrop(self.crop_size),
+                        transforms.Lambda(self._stack_crops_tta),
+                    ])
+                else:
+                    transform = transforms.Compose([
+                        transforms.Resize(self.resize_size),
+                        transforms.TenCrop(self.crop_size),
+                        transforms.Lambda(self._stack_crops_test),
+                    ])
         return transform
 
     def get_loader(self, path, batch_size, num_workers, mode):
@@ -122,7 +149,6 @@ class FER2013DataLoader:
         shuffle = mode == "train"
         dataset = ImageFolder(path, transform=transform)
         
-        # 配置DataLoader参数
         loader_kwargs = {
             'batch_size': batch_size,
             'shuffle': shuffle,
