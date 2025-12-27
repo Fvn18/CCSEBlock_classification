@@ -87,7 +87,7 @@ class GenericDataLoader:
                 ]
             
             if get('use_randaugment', False):
-                base_transforms.append(RandAugment(num_ops=get('randaugment_n', 2), magnitude=get('randaugment_m', 10), generator=self.generator))
+                base_transforms.append(RandAugment(num_ops=get('randaugment_n', 2), magnitude=get('randaugment_m', 10)))
             else:
                 base_transforms.extend([
                     transforms.RandomApply([

@@ -24,28 +24,28 @@ augmentation:
   crop_size: 32
   horizontal_flip_prob: 0.5
   random_rotation_degrees: 15
-  random_erasing_prob: 0.3
-  color_jitter_prob: 0.8
-  color_jitter_brightness: 0.2
-  color_jitter_contrast: 0.2
-  color_jitter_saturation: 0.1
-  color_jitter_hue: 0.1
-  random_affine_prob: 0.3
+  random_erasing_prob: 0.4
+  color_jitter_prob: 0.9
+  color_jitter_brightness: 0.3
+  color_jitter_contrast: 0.3
+  color_jitter_saturation: 0.2
+  color_jitter_hue: 0.15
+  random_affine_prob: 0.4
   gaussian_blur_prob: 0.1
-  random_affine_translate: [0.1, 0.1]
-  random_affine_scale: [0.9, 1.1]
+  random_affine_translate: [0.15, 0.15]
+  random_affine_scale: [0.85, 1.15]
   gaussian_blur_sigma: [0.1, 0.5]
-  use_randaugment: false
-  randaugment_n: 2
-  randaugment_m: 8
+  use_randaugment: true
+  randaugment_n: 3
+  randaugment_m: 10
 
 training:
-  batch_size: 128
-  epochs: 200
-  lr: 0.001
-  weight_decay: 0.01
-  patience: 30
-  gradient_clip: 1.0
+  batch_size: 256
+  epochs: 300
+  lr: 0.003
+  weight_decay: 0.001
+  patience: 40
+  gradient_clip: 2.0
 
 optimizer:
   name: "adamw"
@@ -54,33 +54,33 @@ optimizer:
 
 scheduler:
   name: "cosine"
-  switch_to_plateau_epoch: 150
+  switch_to_plateau_epoch: 200
   use_warmup: true
-  warmup_epochs: 5
-  cosine_t_max: 200
+  warmup_epochs: 10
+  cosine_t_max: 300
   cosine_eta_min: 1e-06
   cosine_T_mult: 1.0
-  step_size: 50
+  step_size: 60
   gamma: 0.1
-  plateau_patience: 10
+  plateau_patience: 15
   plateau_factor: 0.5
 
 loss:
-  type: "sce"
+  type: "focal"
   sce_alpha: 1.0
   sce_beta: 1.0
   sce_ce_only_epochs: 5
   focal_gamma: 2.0
   gce_q: 0.7
-  label_smoothing: 0.05
+  label_smoothing: 0.1
   dynamic_label_smoothing: false
 
 strategies:
-  mixup_alpha: 0.8
-  mixup_prob: 0.5
+  mixup_alpha: 1.0
+  mixup_prob: 0.8
   cutmix_alpha: 1.0
-  cutmix_prob: 0.5
-  use_class_weights: false
+  cutmix_prob: 0.7
+  use_class_weights: true
   class_weights: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
 
 logging:
