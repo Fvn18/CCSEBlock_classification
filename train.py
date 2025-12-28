@@ -32,7 +32,7 @@ from dataset import load_data
 from model import (
     ExtraNet_CCSE, ExtraNet, ExtraNet_CCSE_Lite, ExtraNet_Scalable,
     ccse_resnet18, ccse_resnet34, ccse_resnet50, ccse_resnet101, ccse_resnet152,
-    se_resnet18, se_resnet34, se_resnet50, se_resnet101, se_resnet152
+    se_resnet18, se_resnet34, se_resnet50, se_resnet101, se_resnet152,
 )
 
 
@@ -171,7 +171,7 @@ class Trainer:
             'extranet': lambda: ExtraNet(num_classes=self.num_classes, use_simple_fusion=True, input_channels=input_channels),
             'extranet_ccse_lite': lambda: ExtraNet_CCSE_Lite(num_classes=self.num_classes, use_simple_fusion=True, input_channels=input_channels),
             'extranet_scalable': lambda: ExtraNet_Scalable(
-                self.config.get('scalable_model_scale', 'tiny'), num_classes=self.num_classes, input_channels=input_channels
+                scale=self.config.get('scalable_model_scale', 'tiny'), num_classes=self.num_classes, input_channels=input_channels
             ),
             'ccse_resnet18': lambda: ccse_resnet18(num_classes=self.num_classes, input_channels=input_channels),
             'ccse_resnet34': lambda: ccse_resnet34(num_classes=self.num_classes, input_channels=input_channels),

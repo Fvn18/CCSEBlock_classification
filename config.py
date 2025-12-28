@@ -73,6 +73,7 @@ FLAT_KEYS = {
     "train_path": ("data", "train_path"),
     "val_path": ("data", "val_path"),
     "test_path": ("data", "test_path"),
+    "grayscale_output_channels": ("data", "grayscale_output_channels"),
     "use_tta": ("augmentation", "use_tta"),
     "tta_angles": ("augmentation", "tta_angles"),
     "resize_size": ("augmentation", "resize_size"),
@@ -131,6 +132,7 @@ FLAT_KEYS = {
     "save_best_only": ("logging", "save_best_only"),
     "mean": ("normalization", "mean"),
     "std": ("normalization", "std"),
+
 }
 
 TUPLE_FIELDS = {
