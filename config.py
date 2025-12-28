@@ -42,7 +42,16 @@ DEFAULT = {
         color_jitter_brightness=0.2, color_jitter_contrast=0.2, color_jitter_saturation=0.1,
         random_affine_translate=[0.1, 0.1], random_affine_scale=[0.9, 1.1],
         gaussian_blur_sigma=[0.1, 1.5],
-        use_randaugment=False, randaugment_n=2, randaugment_m=8
+        use_randaugment=False, randaugment_n=2, randaugment_m=8,
+        augmentationon=True,
+        enable_resize=True,
+        enable_random_crop=True,
+        random_crop_padding=4,
+        enable_rotation=False,
+        enable_color_jitter=False,
+        enable_affine=False,
+        enable_blur=False,
+        enable_erasing=False
     ),
     "training": dict(batch_size=128, epochs=450, lr=0.00055, weight_decay=0.045, patience=999, gradient_clip=1.0),
     "optimizer": dict(name="adamw", betas=[0.9, 0.999], momentum=0.9),
@@ -132,6 +141,15 @@ FLAT_KEYS = {
     "save_best_only": ("logging", "save_best_only"),
     "mean": ("normalization", "mean"),
     "std": ("normalization", "std"),
+    "augmentationon": ("augmentation", "augmentationon"),
+    "enable_resize": ("augmentation", "enable_resize"),
+    "enable_random_crop": ("augmentation", "enable_random_crop"),
+    "random_crop_padding": ("augmentation", "random_crop_padding"),
+    "enable_rotation": ("augmentation", "enable_rotation"),
+    "enable_color_jitter": ("augmentation", "enable_color_jitter"),
+    "enable_affine": ("augmentation", "enable_affine"),
+    "enable_blur": ("augmentation", "enable_blur"),
+    "enable_erasing": ("augmentation", "enable_erasing"),
 
 }
 

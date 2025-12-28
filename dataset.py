@@ -70,80 +70,108 @@ class GenericDataLoader:
         use_grayscale = self.dataset_name.lower() in ['fer2013', 'fer2013_new']
         
         if mode == "train":
-            if use_grayscale:
-                grayscale_channels = get('grayscale_output_channels', 1)
-                base_transforms = [
-                    transforms.Grayscale(num_output_channels=grayscale_channels),
-                    transforms.Resize(self.resize_size),
-                    transforms.RandomCrop(self.crop_size, padding=4),
-                    transforms.RandomHorizontalFlip(p=self.horizontal_flip_prob),
-                    transforms.RandomRotation(degrees=self.random_rotation_degrees),
-                ]
-            else:
+            base_transforms = []
 
-                base_transforms = [
-                    transforms.Resize(self.resize_size),
-                    transforms.RandomCrop(self.crop_size, padding=4),
-                    transforms.RandomHorizontalFlip(p=self.horizontal_flip_prob),
-                    transforms.RandomRotation(degrees=self.random_rotation_degrees),
-                ]
-            
+            if use_grayscale:
+                base_transforms.append(
+                    transforms.Grayscale(num_output_channels=get('grayscale_output_channels', 1))
+                )
+
+            if get('enable_resize', True):
+                base_transforms.append(transforms.Resize(self.resize_size))
+
+            if get('enable_random_crop', True):
+                base_transforms.append(
+                    transforms.RandomCrop(self.crop_size, padding=get('random_crop_padding', 4))
+                )
+
+            if self.horizontal_flip_prob > 0:
+                base_transforms.append(
+                    transforms.RandomHorizontalFlip(p=self.horizontal_flip_prob)
+                )
+
+            if get('enable_rotation', False):
+                base_transforms.append(
+                    transforms.RandomRotation(self.random_rotation_degrees)
+                )
+
             if get('use_randaugment', False):
-                base_transforms.append(RandAugment(num_ops=get('randaugment_n', 2), magnitude=get('randaugment_m', 10)))
+                base_transforms.append(
+                    RandAugment(
+                        num_ops=get('randaugment_n', 2),
+                        magnitude=get('randaugment_m', 10)
+                    )
+                )
             else:
-                base_transforms.extend([
-                    transforms.RandomApply([
-                        transforms.ColorJitter(
-                            brightness=self.color_jitter_brightness,
-                            contrast=self.color_jitter_contrast,
-                            saturation=self.color_jitter_saturation)
-                    ], p=self.color_jitter_prob),
-                    transforms.RandomApply([
-                        transforms.RandomAffine(
-                            degrees=0,
-                            translate=self.random_affine_translate,
-                            scale=self.random_affine_scale)
-                    ], p=self.random_affine_prob),
-                    transforms.RandomApply([
-                        transforms.GaussianBlur(kernel_size=3, sigma=self.gaussian_blur_sigma)
-                    ], p=self.gaussian_blur_prob),
-                ])
+                if get('enable_color_jitter', False):
+                    base_transforms.append(
+                        transforms.RandomApply([
+                            transforms.ColorJitter(
+                                self.color_jitter_brightness,
+                                self.color_jitter_contrast,
+                                self.color_jitter_saturation
+                            )
+                        ], p=self.color_jitter_prob)
+                    )
+
+                if get('enable_affine', False):
+                    base_transforms.append(
+                        transforms.RandomApply([
+                            transforms.RandomAffine(
+                                degrees=0,
+                                translate=self.random_affine_translate,
+                                scale=self.random_affine_scale
+                            )
+                        ], p=self.random_affine_prob)
+                    )
+
+                if get('enable_blur', False):
+                    base_transforms.append(
+                        transforms.RandomApply([
+                            transforms.GaussianBlur(3, self.gaussian_blur_sigma)
+                        ], p=self.gaussian_blur_prob)
+                    )
+
             base_transforms.extend([
                 transforms.ToTensor(),
-                transforms.Normalize(mean=self.mean, std=self.std),
-                transforms.RandomErasing(p=self.random_erasing_prob, scale=(0.015, 0.045), ratio=(0.5, 2.0))
+                transforms.Normalize(self.mean, self.std)
             ])
+
+            if get('enable_erasing', False):
+                base_transforms.append(
+                    transforms.RandomErasing(p=self.random_erasing_prob)
+                )
+
             transform = transforms.Compose(base_transforms)
         else:
+            use_tencrop = get('use_tencrop', False)
+            use_tta = get('use_tta', False)
             if use_grayscale:
-                grayscale_channels = get('grayscale_output_channels', 1)  
-                if get('use_tta', False):
-                    transform = transforms.Compose([
-                        transforms.Grayscale(num_output_channels=grayscale_channels),
-                        transforms.Resize(self.resize_size),
+                grayscale_channels = get('grayscale_output_channels', 1)
+                base = [transforms.Grayscale(num_output_channels=grayscale_channels), transforms.Resize(self.resize_size)]
+            else:
+                base = [transforms.Resize(self.resize_size)]
+
+            if use_tta and not use_tencrop:
+                raise ValueError("Invalid config: use_tta=True but use_tencrop=False. TTA requires multi-view input (TenCrop). Please set use_tencrop: true in config.yaml or disable use_tta.")
+
+            if use_tencrop:
+                if use_tta:
+                    transform = transforms.Compose(base + [
                         transforms.TenCrop(self.crop_size),
-                        transforms.Lambda(self._stack_crops_tta),
+                        transforms.Lambda(self._stack_crops_tta)
                     ])
                 else:
-                    transform = transforms.Compose([
-                        transforms.Grayscale(num_output_channels=grayscale_channels),
-                        transforms.Resize(self.resize_size),
+                    transform = transforms.Compose(base + [
                         transforms.TenCrop(self.crop_size),
-                        transforms.Lambda(self._stack_crops_test),
+                        transforms.Lambda(self._stack_crops_test)
                     ])
             else:
-                if get('use_tta', False):
-                    transform = transforms.Compose([
-                        transforms.Resize(self.resize_size),
-                        transforms.TenCrop(self.crop_size),
-                        transforms.Lambda(self._stack_crops_tta),
-                    ])
-                else:
-                    transform = transforms.Compose([
-                        transforms.Resize(self.resize_size),
-                        transforms.TenCrop(self.crop_size),
-                        transforms.Lambda(self._stack_crops_test),
-                    ])
+                transform = transforms.Compose(base + [
+                    transforms.CenterCrop(self.crop_size),
+                    transforms.ToTensor(),
+                    transforms.Normalize(self.mean, self.std)
+                ])
         return transform
 
     def get_loader(self, path, batch_size, num_workers, mode):
