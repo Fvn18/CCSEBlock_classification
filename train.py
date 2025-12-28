@@ -33,6 +33,7 @@ from model import (
     ExtraNet_CCSE, ExtraNet, ExtraNet_CCSE_Lite, ExtraNet_Scalable,
     ccse_resnet18, ccse_resnet34, ccse_resnet50, ccse_resnet101, ccse_resnet152,
     se_resnet18, se_resnet34, se_resnet50, se_resnet101, se_resnet152,
+    resnet18, resnet34, resnet50, resnet101, resnet152
 )
 
 
@@ -182,7 +183,12 @@ class Trainer:
             'se_resnet34': lambda: se_resnet34(num_classes=self.num_classes, input_channels=input_channels),
             'se_resnet50': lambda: se_resnet50(num_classes=self.num_classes, input_channels=input_channels),
             'se_resnet101': lambda: se_resnet101(num_classes=self.num_classes, input_channels=input_channels),
-            'se_resnet152': lambda: se_resnet152(num_classes=self.num_classes, input_channels=input_channels)
+            'se_resnet152': lambda: se_resnet152(num_classes=self.num_classes, input_channels=input_channels),
+            'resnet18': lambda: resnet18(num_classes=self.num_classes, input_channels=input_channels),
+            'resnet34': lambda: resnet34(num_classes=self.num_classes, input_channels=input_channels),
+            'resnet50': lambda: resnet50(num_classes=self.num_classes, input_channels=input_channels),
+            'resnet101': lambda: resnet101(num_classes=self.num_classes, input_channels=input_channels),
+            'resnet152': lambda: resnet152(num_classes=self.num_classes, input_channels=input_channels),
         }
 
         model_name = self.config['model'].lower()
