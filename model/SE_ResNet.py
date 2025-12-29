@@ -222,12 +222,12 @@ def resnet152(num_classes=1000, input_channels=3):
 
 if __name__ == "__main__":
 
-    model = se_resnet50(num_classes=1000)
+    model = resnet18(num_classes=7, input_channels=1)
     
     total_params = sum(p.numel() for p in model.parameters())
-    print(f"SE-ResNet-50 parameter count: {total_params / 1e6:.2f}M")
+    print(f"SE-ResNet-50 parameter count: {total_params / 1e6:.6f}M")
 
-    input_tensor = torch.randn(1, 3, 224, 224)
+    input_tensor = torch.randn(1, 1, 48, 48)
     output = model(input_tensor)
     print(f"Input shape: {input_tensor.shape}")
     print(f"Output shape: {output.shape}") 

@@ -47,20 +47,18 @@ class GenericDataLoader:
         ])
 
     def _stack_crops_tta(self, crops):
-        normalized_crops = []
+        preprocess = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize(mean=self.mean, std=self.std)
+        ])
         
-        for crop in crops:
-            tensor = transforms.ToTensor()(crop)
-            tensor = transforms.Normalize(mean=self.mean, std=self.std)(tensor)
-            normalized_crops.append(tensor)
+        normalized_crops = [preprocess(crop) for crop in crops]
         
-        center_crop_pil = transforms.CenterCrop(self.crop_size)(crops[0])
+        center_crop = crops[4] if len(crops) > 4 else crops[0]
         
         for angle in self.tta_angles:
-            rotated = F.rotate(center_crop_pil, angle, interpolation=transforms.InterpolationMode.BILINEAR)
-            tensor = transforms.ToTensor()(rotated)
-            tensor = transforms.Normalize(mean=self.mean, std=self.std)(tensor)
-            normalized_crops.append(tensor)
+            rotated = F.rotate(center_crop, angle, interpolation=transforms.InterpolationMode.BILINEAR)
+            normalized_crops.append(preprocess(rotated))
         
         return torch.stack(normalized_crops, dim=0)
 
@@ -167,7 +165,7 @@ class GenericDataLoader:
             if use_tencrop:
                 transform = transforms.Compose(
                     base + [
-                        transforms.TenCrop(self.crop_size),
+                        transforms.FiveCrop(self.crop_size),
                         transforms.Lambda(
                             self._stack_crops_tta if use_tta else self._stack_crops_test
                         )
