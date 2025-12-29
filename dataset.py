@@ -146,32 +146,42 @@ class GenericDataLoader:
         else:
             use_tencrop = get('use_tencrop', False)
             use_tta = get('use_tta', False)
-            if use_grayscale:
-                grayscale_channels = get('grayscale_output_channels', 1)
-                base = [transforms.Grayscale(num_output_channels=grayscale_channels), transforms.Resize(self.resize_size)]
-            else:
-                base = [transforms.Resize(self.resize_size)]
 
             if use_tta and not use_tencrop:
-                raise ValueError("Invalid config: use_tta=True but use_tencrop=False. TTA requires multi-view input (TenCrop). Please set use_tencrop: true in config.yaml or disable use_tta.")
+                raise ValueError(
+                    "Invalid config: use_tta=True requires use_tencrop=True in test mode."
+                )
+
+            base = []
+
+            if use_grayscale:
+                base.append(
+                    transforms.Grayscale(
+                        num_output_channels=get('grayscale_output_channels', 1)
+                    )
+                )
+
+            if get('enable_resize', True):
+                base.append(transforms.Resize(self.resize_size))
 
             if use_tencrop:
-                if use_tta:
-                    transform = transforms.Compose(base + [
+                transform = transforms.Compose(
+                    base + [
                         transforms.TenCrop(self.crop_size),
-                        transforms.Lambda(self._stack_crops_tta)
-                    ])
-                else:
-                    transform = transforms.Compose(base + [
-                        transforms.TenCrop(self.crop_size),
-                        transforms.Lambda(self._stack_crops_test)
-                    ])
+                        transforms.Lambda(
+                            self._stack_crops_tta if use_tta else self._stack_crops_test
+                        )
+                    ]
+                )
             else:
-                transform = transforms.Compose(base + [
-                    transforms.CenterCrop(self.crop_size),
-                    transforms.ToTensor(),
-                    transforms.Normalize(self.mean, self.std)
-                ])
+                transform = transforms.Compose(
+                    base + [
+                        transforms.CenterCrop(self.crop_size),
+                        transforms.ToTensor(),
+                        transforms.Normalize(self.mean, self.std)
+                    ]
+                )
+
         return transform
 
     def get_loader(self, path, batch_size, num_workers, mode):

@@ -317,6 +317,7 @@ class Trainer:
             ).to(self.device),
             'sce': lambda: SymmetricCrossEntropy(
                 num_classes=self.num_classes,
+                class_weights=self.class_weights,
                 alpha=self.config.get('sce_alpha', 0.1),
                 beta=self.config.get('sce_beta', 1.0),
                 ce_only_epochs=self.config.get('sce_ce_only_epochs', 8),

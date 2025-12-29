@@ -129,7 +129,7 @@ class GeneralizedCrossEntropy(nn.Module):
 
 class SymmetricCrossEntropy(nn.Module):
 
-    def __init__(self, num_classes: int, alpha: float = 0.1, beta: float = 1.0,
+    def __init__(self, num_classes: int, alpha: float = 0.1, beta: float = 1.0, class_weights: Optional[Tensor] = None,
                  ce_only_epochs: int = 8, label_smoothing: float = 0.1, reduction: str = 'mean'):
         super().__init__()
         self.alpha = alpha
@@ -138,7 +138,8 @@ class SymmetricCrossEntropy(nn.Module):
         self.ce_only_epochs = ce_only_epochs
         self.label_smoothing = label_smoothing
         self.reduction = reduction
-        self.cross_entropy = nn.CrossEntropyLoss(label_smoothing=label_smoothing, reduction=reduction)
+        self.class_weights = class_weights
+        self.cross_entropy = nn.CrossEntropyLoss(label_smoothing=label_smoothing, reduction=reduction, weight=self.class_weights)
 
     def forward(self, pred: Tensor, labels: Tensor, epoch: Optional[int] = None) -> Tensor:
         if epoch is not None and epoch < self.ce_only_epochs:
