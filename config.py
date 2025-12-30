@@ -118,6 +118,7 @@ FLAT_KEYS = {
     "warmup_epochs": ("scheduler", "warmup_epochs"),
     "cosine_t_max": ("scheduler", "cosine_t_max"),
     "cosine_eta_min": ("scheduler", "cosine_eta_min"),
+    "cosine_T_mult": ("scheduler", "cosine_T_mult"),
     "step_size": ("scheduler", "step_size"),
     "gamma": ("scheduler", "gamma"),
     "plateau_patience": ("scheduler", "plateau_patience"),
@@ -138,6 +139,8 @@ FLAT_KEYS = {
     "class_weights": ("strategies", "class_weights"),
     "save_checkpoints": ("logging", "save_checkpoints"),
     "save_freq": ("logging", "save_freq"),
+    "checkpoint_freq": ("logging", "save_freq"),
+    "resume": ("logging", "resume"),
     "log_freq": ("logging", "log_freq"),
     "save_best_only": ("logging", "save_best_only"),
     "mean": ("normalization", "mean"),
@@ -196,7 +199,7 @@ def get_defaults() -> Dict[str, Any]:
 
 def print_config(config: Dict[str, Any]) -> None:
     print("\n" + "="*60)
-    print("FER2013 Experiment Configuration:")
+    print("Classification Experiment Configuration:")
     print("="*60)
 
     categories = {

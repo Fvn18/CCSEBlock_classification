@@ -107,6 +107,7 @@ logging:
   save_freq: 10
   log_freq: 2
   save_best_only: true
+  resume: "./checkpoint"
 
 normalization:
   mean: [0.4914, 0.4822, 0.4465]

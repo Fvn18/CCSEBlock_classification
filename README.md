@@ -9,7 +9,7 @@ This repository implements CrossChannelSegmentationExcitationBlock (CCSE) and va
   - CCSE-ResNet variants (ResNet18, 34, 50, 101, 152)
   - SE-ResNet variants with Squeeze-and-Excitation blocks
   - ExtraNet series with CCSE enhancement
-  - Scalable ExtraNet architectures (pico, nano, micro, tiny, small, medium, large)
+  - Scalable ExtraNet architectures (pico, nano, tiny, base, large, xlarge, huge)
 - **Advanced Training Strategies**: Mixup, CutMix, Test-Time Augmentation (TTA)
 - **Loss Functions**: Symmetric Cross Entropy (SCE), Focal Loss, Generalized Cross Entropy (GCE), and more
 - **Data Augmentation**: Comprehensive pipeline with geometric and color transformations
@@ -43,7 +43,7 @@ Core attention mechanism that enhances both spatial and channel dimensions throu
 - **ExtraNet**: Base architecture with efficient residual connections
 - **ExtraNet_CCSE**: Enhanced with CrossChannelSegmentationExcitationBlock for better feature extraction
 - **ExtraNet_CCSE_Lite**: Lightweight version optimized for mobile deployment
-- **ExtraNet_Scalable**: Configurable model sizes from pico (minimal) to large (comprehensive)
+- **ExtraNet_Scalable**: Configurable model sizes from pico (minimal) to huge (comprehensive), including: pico, nano, tiny, base, large, xlarge, huge
 
 ## Installation
 
