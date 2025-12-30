@@ -18,7 +18,7 @@ conda_package_streaming @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt5
 crcmod==1.7
 cryptography @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_fdxcx92j10/croot/cryptography_1740577852661/work
 distro @ file:///Users/builder/cbouss/perseverance-python-buildout/croot/distro_1728591855492/work
-filelock==3.14.0
+filelock==3.20.1
 frozendict @ file:///Users/builder/cbouss/perseverance-python-buildout/croot/frozendict_1728605521897/work
 idna @ file:///Users/builder/cbouss/perseverance-python-buildout/croot/idna_1728585920859/work
 jmespath==0.10.0
@@ -42,15 +42,15 @@ Pygments @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_f
 PySocks @ file:///home/conda/feedstock_root/build_artifacts/pysocks_1733217236728/work
 pytz==2023.4
 PyYAML==6.0.3
-requests==2.28.2
+requests==2.32.4
 rich==13.4.2
 ruamel.yaml @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_beoui95smx/croot/ruamel.yaml_1745960312720/work
 ruamel.yaml.clib @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_d9xusw0yil/croot/ruamel.yaml.clib_1745937162586/work
-setuptools==60.2.0
+setuptools==78.1.1
 six==1.17.0
-tqdm==4.65.2
+tqdm==4.66.3
 truststore @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_a1qa3ogm4o/croot/truststore_1736550138575/work
 typing_extensions @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_0b3jpv_f79/croot/typing_extensions_1734714864260/work
-urllib3==1.26.20
+urllib3==2.6.0
 wheel==0.45.1
 zstandard @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_a5_i6g4o6n/croot/zstandard_1731356352787/work
