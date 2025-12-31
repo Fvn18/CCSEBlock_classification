@@ -31,87 +31,198 @@ def deep_merge(a: Dict[str, Any], b: Mapping[str, Any]) -> Dict[str, Any]:
     return a
 
 DEFAULT = {
-    "basic": dict(dataset="fer2013", device="auto", num_workers=8, seed=33, use_amp=True),
-    "model": dict(name="extranet_scalable", scalable_model_scale="tiny", use_torch_compile=False),
-    "data": dict(root="./fer2013", train_path="./fer2013/train", val_path="./fer2013/val", test_path="./fer2013/test"),
+    "basic": dict(
+        dataset="fer2013", 
+        device="auto", 
+        num_workers=8, 
+        seed=33, 
+        use_amp=True
+    ),
+    "model": dict(
+        name="extranet_scalable", 
+        scalable_model_scale="tiny", 
+        use_torch_compile=False
+    ),
+    "data": dict(
+        root="./fer2013", 
+        train_path="./fer2013/train", 
+        val_path="./fer2013/val", 
+        test_path="./fer2013/test",
+        grayscale_output_channels=3
+    ),
     "augmentation": dict(
-        use_tta=True, tta_angles=[5.0, -5.0, 2.5, -2.5],
-        resize_size=96, crop_size=80, horizontal_flip_prob=0.5,
-        random_rotation_degrees=10, random_erasing_prob=0.25, color_jitter_prob=0.0,
-        random_affine_prob=0.3, gaussian_blur_prob=0.2,
-        color_jitter_brightness=0.2, color_jitter_contrast=0.2, color_jitter_saturation=0.1,
-        random_affine_translate=[0.1, 0.1], random_affine_scale=[0.9, 1.1],
-        gaussian_blur_sigma=[0.1, 1.5],
-        use_randaugment=False, randaugment_n=2, randaugment_m=8,
-        augmentationon=True,
+        use_tta=True, 
+        tta_angles=[5.0, -5.0, 2.5, -2.5],
+        
         enable_resize=True,
+        resize_size=96,
+
         enable_random_crop=True,
         random_crop_padding=4,
+        crop_size=80,
+
+        horizontal_flip_prob=0.5,
+
         enable_rotation=False,
+        random_rotation_degrees=10,
+
+        enable_erasing=False,
+        random_erasing_prob=0.25,
+
         enable_color_jitter=False,
+        color_jitter_prob=0.0,
+        color_jitter_brightness=0.2, 
+        color_jitter_contrast=0.2, 
+        color_jitter_saturation=0.1,
+        color_jitter_hue=0.0,
+
         enable_affine=False,
+        random_affine_prob=0.3, 
+        random_affine_translate=[0.1, 0.1], 
+        random_affine_scale=[0.9, 1.1],
+
         enable_blur=False,
-        enable_erasing=False
+        gaussian_blur_prob=0.2,
+        gaussian_blur_sigma=[0.1, 1.5],
+
+        use_randaugment=False, 
+        randaugment_n=2, 
+        randaugment_m=8,
+        
+        use_tencrop=False
     ),
-    "training": dict(batch_size=128, epochs=450, lr=0.00055, weight_decay=0.045, patience=999, gradient_clip=1.0),
-    "optimizer": dict(name="adamw", betas=[0.9, 0.999], momentum=0.9),
+    "training": dict(
+        batch_size=128, 
+        epochs=450, 
+        lr=0.00055, 
+        weight_decay=0.045, 
+        patience=999, 
+        gradient_clip=1.0
+    ),
+    "optimizer": dict(
+        name="adamw", 
+        betas=[0.9, 0.999], 
+        momentum=0.9
+    ),
     "scheduler": dict(
-        name="cosine", switch_to_plateau_epoch=999,
-        use_warmup=True, warmup_epochs=15,
-        cosine_t_max=450, cosine_eta_min=5e-07,
-        step_size=30, gamma=0.1, plateau_patience=10, plateau_factor=0.1
+        name="cosine", 
+        switch_to_plateau_epoch=999,
+        use_warmup=True, 
+        warmup_epochs=15,
+        cosine_t_max=450, 
+        cosine_eta_min=5e-07,
+        cosine_T_mult=1.0,
+        step_size=30, 
+        gamma=0.1, 
+        plateau_patience=10, 
+        plateau_factor=0.1
     ),
-    "loss": dict(type="sce", focal_gamma=2.1, gce_q=0.9, sce_alpha=0.8, sce_beta=1.0,
-                 sce_ce_only_epochs=10, label_smoothing=0.15, dynamic_label_smoothing=False),
-    "strategies": dict(mixup_alpha=0.25, mixup_prob=0.5, cutmix_alpha=0.9, cutmix_prob=0.5,
-                       use_class_weights=False, class_weights=[1.4, 4.5, 1.3, 1.1, 1.2, 1.3, 1.5]),
-    "logging": dict(save_checkpoints=False, save_freq=10, log_freq=5, save_best_only=True),
-    "normalization": dict(mean=[0.5], std=[0.5]),
+    "loss": dict(
+        type="sce", 
+        sce_alpha=0.8, 
+        sce_beta=1.0,
+        sce_ce_only_epochs=10,
+        focal_gamma=2.1, 
+        gce_q=0.9, 
+        label_smoothing=0.15, 
+        dynamic_label_smoothing=False
+    ),
+    "strategies": dict(
+        mixup_alpha=0.25, 
+        mixup_prob=0.5, 
+        cutmix_alpha=0.9, 
+        cutmix_prob=0.5,
+        use_class_weights=False, 
+        class_weights=[1.4, 4.5, 1.3, 1.1, 1.2, 1.3, 1.5]
+    ),
+    "logging": dict(
+        save_checkpoints=False, 
+        checkpoint_freq=10,
+        if_first_train=True,
+        log_freq=5, 
+        save_best_only=True,
+        resume="./checkpoint"
+    ),
+    "normalization": dict(
+        mean=[0.5], 
+        std=[0.5]
+    ),
 }
 
 FLAT_KEYS = {
+    # basic section
     "dataset": ("basic", "dataset"),
     "device": ("basic", "device"),
     "num_workers": ("basic", "num_workers"),
     "seed": ("basic", "seed"),
     "use_amp": ("basic", "use_amp"),
+
+    # model section
     "model": ("model", "name"),
     "scalable_model_scale": ("model", "scalable_model_scale"),
     "use_torch_compile": ("model", "use_torch_compile"),
+
+    # data section
     "data_root": ("data", "root"),
     "train_path": ("data", "train_path"),
     "val_path": ("data", "val_path"),
     "test_path": ("data", "test_path"),
     "grayscale_output_channels": ("data", "grayscale_output_channels"),
-    "use_tta": ("augmentation", "use_tta"),
+
+    # augmentation section
     "use_tencrop": ("augmentation", "use_tencrop"),
+    "use_tta": ("augmentation", "use_tta"),
     "tta_angles": ("augmentation", "tta_angles"),
+    
+    "enable_resize": ("augmentation", "enable_resize"),
     "resize_size": ("augmentation", "resize_size"),
+    
+    "enable_random_crop": ("augmentation", "enable_random_crop"),
+    "random_crop_padding": ("augmentation", "random_crop_padding"),
     "crop_size": ("augmentation", "crop_size"),
+    
     "horizontal_flip_prob": ("augmentation", "horizontal_flip_prob"),
+    
+    "enable_rotation": ("augmentation", "enable_rotation"),
     "random_rotation_degrees": ("augmentation", "random_rotation_degrees"),
+    
+    "enable_erasing": ("augmentation", "enable_erasing"),
     "random_erasing_prob": ("augmentation", "random_erasing_prob"),
+    
+    "enable_color_jitter": ("augmentation", "enable_color_jitter"),
     "color_jitter_prob": ("augmentation", "color_jitter_prob"),
-    "random_affine_prob": ("augmentation", "random_affine_prob"),
-    "gaussian_blur_prob": ("augmentation", "gaussian_blur_prob"),
     "color_jitter_brightness": ("augmentation", "color_jitter_brightness"),
     "color_jitter_contrast": ("augmentation", "color_jitter_contrast"),
     "color_jitter_saturation": ("augmentation", "color_jitter_saturation"),
+    "color_jitter_hue": ("augmentation", "color_jitter_hue"),
+    
+    "enable_affine": ("augmentation", "enable_affine"),
+    "random_affine_prob": ("augmentation", "random_affine_prob"),
     "random_affine_translate": ("augmentation", "random_affine_translate"),
     "random_affine_scale": ("augmentation", "random_affine_scale"),
+    
+    "enable_blur": ("augmentation", "enable_blur"),
+    "gaussian_blur_prob": ("augmentation", "gaussian_blur_prob"),
     "gaussian_blur_sigma": ("augmentation", "gaussian_blur_sigma"),
+    
     "use_randaugment": ("augmentation", "use_randaugment"),
     "randaugment_n": ("augmentation", "randaugment_n"),
     "randaugment_m": ("augmentation", "randaugment_m"),
+
+    # training section
     "batch_size": ("training", "batch_size"),
     "epochs": ("training", "epochs"),
     "lr": ("training", "lr"),
     "weight_decay": ("training", "weight_decay"),
     "patience": ("training", "patience"),
     "gradient_clip": ("training", "gradient_clip"),
+
+    # optimizer section
     "optimizer": ("optimizer", "name"),
     "betas": ("optimizer", "betas"),
     "momentum": ("optimizer", "momentum"),
+
+    # scheduler section
     "scheduler": ("scheduler", "name"),
     "switch_to_plateau_epoch": ("scheduler", "switch_to_plateau_epoch"),
     "use_warmup": ("scheduler", "use_warmup"),
@@ -123,37 +234,36 @@ FLAT_KEYS = {
     "gamma": ("scheduler", "gamma"),
     "plateau_patience": ("scheduler", "plateau_patience"),
     "plateau_factor": ("scheduler", "plateau_factor"),
+    
+    # loss section
     "loss_type": ("loss", "type"),
-    "focal_gamma": ("loss", "focal_gamma"),
-    "gce_q": ("loss", "gce_q"),
     "sce_alpha": ("loss", "sce_alpha"),
     "sce_beta": ("loss", "sce_beta"),
     "sce_ce_only_epochs": ("loss", "sce_ce_only_epochs"),
+    "focal_gamma": ("loss", "focal_gamma"),
+    "gce_q": ("loss", "gce_q"),
     "label_smoothing": ("loss", "label_smoothing"),
     "dynamic_label_smoothing": ("loss", "dynamic_label_smoothing"),
+
+    # strategies section
     "mixup_alpha": ("strategies", "mixup_alpha"),
     "mixup_prob": ("strategies", "mixup_prob"),
     "cutmix_alpha": ("strategies", "cutmix_alpha"),
     "cutmix_prob": ("strategies", "cutmix_prob"),
     "use_class_weights": ("strategies", "use_class_weights"),
     "class_weights": ("strategies", "class_weights"),
+
+    # logging section
     "save_checkpoints": ("logging", "save_checkpoints"),
-    "save_freq": ("logging", "save_freq"),
-    "checkpoint_freq": ("logging", "save_freq"),
-    "resume": ("logging", "resume"),
+    "checkpoint_freq": ("logging", "checkpoint_freq"),
+    "if_first_train": ("logging", "if_first_train"),
     "log_freq": ("logging", "log_freq"),
     "save_best_only": ("logging", "save_best_only"),
+    "resume": ("logging", "resume"),
+
+    # normalization section
     "mean": ("normalization", "mean"),
     "std": ("normalization", "std"),
-    "enable_resize": ("augmentation", "enable_resize"),
-    "enable_random_crop": ("augmentation", "enable_random_crop"),
-    "random_crop_padding": ("augmentation", "random_crop_padding"),
-    "enable_rotation": ("augmentation", "enable_rotation"),
-    "enable_color_jitter": ("augmentation", "enable_color_jitter"),
-    "enable_affine": ("augmentation", "enable_affine"),
-    "enable_blur": ("augmentation", "enable_blur"),
-    "enable_erasing": ("augmentation", "enable_erasing"),
-
 }
 
 TUPLE_FIELDS = {
@@ -203,15 +313,42 @@ def print_config(config: Dict[str, Any]) -> None:
     print("="*60)
 
     categories = {
-        'Basic Configuration': ['dataset', 'device', 'num_workers', 'seed', 'use_amp'],
-        'Model Configuration': ['model', 'scalable_model_scale', 'use_torch_compile'],
-        'Data Configuration': ['data_root', 'train_path', 'val_path', 'test_path'],
-        'Training Configuration': ['batch_size', 'epochs', 'lr', 'weight_decay', 'patience', 'gradient_clip'],
-        'Optimizer Configuration': ['optimizer', 'betas', 'momentum'],
-        'Scheduler Configuration': ['scheduler', 'use_warmup', 'warmup_epochs', 'cosine_t_max', 'cosine_eta_min'],
-        'Loss Function Configuration': ['loss_type', 'focal_gamma', 'sce_alpha', 'sce_beta', 'label_smoothing'],
-        'Data Augmentation Configuration': ['use_tta', 'resize_size', 'crop_size', 'horizontal_flip_prob', 'use_randaugment'],
-        'Training Strategies': ['mixup_alpha', 'mixup_prob', 'cutmix_alpha', 'cutmix_prob', 'use_class_weights']
+        'Basic Configuration': [
+            'dataset', 'device', 'num_workers', 'seed', 'use_amp'
+        ],
+        'Model Configuration': [
+            'model', 'scalable_model_scale', 'use_torch_compile'
+        ],
+        'Data Configuration': [
+            'data_root', 'train_path', 'val_path', 'test_path'
+        ],
+        'Training Configuration': [
+            'batch_size', 'epochs', 'lr', 'weight_decay', 'patience', 
+            'gradient_clip', 'if_first_train'
+        ],
+        'Optimizer Configuration': [
+            'optimizer', 'betas', 'momentum'
+        ],
+        'Scheduler Configuration': [
+            'scheduler', 'use_warmup', 'warmup_epochs', 'cosine_t_max', 
+            'cosine_eta_min', 'cosine_T_mult'
+        ],
+        'Loss Function Configuration': [
+            'loss_type', 'focal_gamma', 'sce_alpha', 'sce_beta', 
+            'label_smoothing', 'gce_q'
+        ],
+        'Data Augmentation Configuration': [
+            'use_tta', 'resize_size', 'crop_size', 'horizontal_flip_prob', 
+            'color_jitter_brightness', 'color_jitter_contrast', 
+            'color_jitter_saturation', 'color_jitter_hue', 'use_randaugment'
+        ],
+        'Training Strategies': [
+            'mixup_alpha', 'mixup_prob', 'cutmix_alpha', 'cutmix_prob', 
+            'use_class_weights'
+        ],
+        'Normalization Configuration': [
+            'mean', 'std'
+        ]
     }
 
     for category, keys in categories.items():

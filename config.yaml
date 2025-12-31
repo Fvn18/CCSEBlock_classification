@@ -103,8 +103,9 @@ strategies:
   class_weights: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
 
 logging:
-  save_checkpoints: false
-  save_freq: 10
+  save_checkpoints: true
+  checkpoint_freq: 10
+  if_first_train: false
   log_freq: 2
   save_best_only: true
   resume: "./checkpoint"

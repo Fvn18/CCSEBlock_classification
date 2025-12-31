@@ -4,19 +4,16 @@ import time
 import random
 import logging
 import argparse
-from datetime import datetime
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional, Tuple, List
-from dataclasses import dataclass
 
-import yaml
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import seaborn as sns
-
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -25,869 +22,817 @@ from tqdm.auto import tqdm
 from sklearn.metrics import confusion_matrix, classification_report, accuracy_score, f1_score
 
 import config
-from config import get_defaults, print_config, load_config
 from utils import (
-    set_seed,
-    mixup_data,
-    cutmix_data,
-    KLLabelSmoothingLoss,
-    FocalLoss,
-    GeneralizedCrossEntropy,
-    SymmetricCrossEntropy,
-    get_rng_device,
+    set_seed, mixup_data, cutmix_data, KLLabelSmoothingLoss, 
+    FocalLoss, GeneralizedCrossEntropy, SymmetricCrossEntropy, get_rng_device
 )
 from dataset import load_data
-from model import (
-    ExtraNet_CCSE, ExtraNet, ExtraNet_CCSE_Lite, ExtraNet_Scalable,
-    ccse_resnet18, ccse_resnet34, ccse_resnet50, ccse_resnet101, ccse_resnet152,
-    se_resnet18, se_resnet34, se_resnet50, se_resnet101, se_resnet152,
-    resnet18, resnet34, resnet50, resnet101, resnet152
-)
-
-
-@dataclass
-class TrainingMetrics:
-    train_losses: List[float] = None
-    train_accs: List[float] = None
-    val_losses: List[float] = None
-    val_accs: List[float] = None
-    learning_rates: List[float] = None
-
-    def __post_init__(self):
-        self.train_losses = []
-        self.train_accs = []
-        self.val_losses = []
-        self.val_accs = []
-        self.learning_rates = []
+import model as models_module
 
 class Trainer:
-    def __init__(self, cfg: Dict[str, Any]) -> None:
-        self.config = cfg
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config
 
-        self.device = self._setup_device()
-        self.result_dir = self._create_result_dir()
+        self.device = self._select_computation_device()
+
+        self.resume_path_obj, self.results_directory = self._create_results_directory_and_resume_path()
+
         self._setup_logging()
 
-        self.best_val_acc: float = 0.0
-        self.best_epoch: int = 0
-        self.metrics = TrainingMetrics()
-        self.patience_counter: int = 0
+        self.best_validation_accuracy = 0.0
+        self.best_epoch_index = 0
+        self.early_stop_counter = 0
 
-        self.use_amp = cfg.get("use_amp", False) and self.device.type == "cuda"
-        self.scaler = GradScaler() if self.use_amp else None
+        self.metrics = {
+            "train_loss": [],
+            "train_accuracy": [],
+            "val_loss": [],
+            "val_accuracy": [],
+            "learning_rate": []
+        }
 
-        self.loss_type = cfg.get("loss_type", "sce")
-        self.base_label_smoothing = cfg.get("label_smoothing", 0.0)
-        self.dynamic_label_smoothing = cfg.get("dynamic_label_smoothing", False)
-        self.class_weights = None
+        self.scaler = (
+            GradScaler()
+            if self.config.get("use_amp") and self.device.type == "cuda"
+            else None
+        )
 
-        seed = cfg.get("seed", 42)
-        rng_device = get_rng_device(self.device)
-        self.rng = torch.Generator(device=rng_device)
-        self.rng.manual_seed(seed)
-        self.rng_device = rng_device
+        self.rng = (
+            torch.Generator(device=get_rng_device(self.device))
+            .manual_seed(self.config["seed"])
+        )
 
-        print_config(cfg)
+    def _select_device(self):
+        device_choice = self.config.get("device", "auto")
 
-    def _setup_device(self) -> torch.device:
-        device_arg = self.config.get("device", "auto")
-        if device_arg == "auto":
+        if device_choice == "auto":
             if torch.cuda.is_available():
-                device = "cuda"
-            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-                device = "mps"
+                device = torch.device("cuda")
+                print(f"Using CUDA device: {torch.cuda.get_device_name()}")
+            elif torch.backends.mps.is_available():
+                device = torch.device("mps")
+                print("Using MPS device")
             else:
-                device = "cpu"
+                device = torch.device("cpu")
+                print("Using CPU device")
         else:
-            device = device_arg
+            device = torch.device(device_choice)
+            print(f"Using specified device: {device_choice}")
 
-        torch_device = torch.device(device)
-        print(f"Using device: {device}")
+        return device
 
-        if device == "cuda":
-            try:
-                print(f"GPU: {torch.cuda.get_device_name(0)}")
-                print(f"CUDA version: {torch.version.cuda}")
-                print(f"GPU memory: {torch.cuda.get_device_properties(0).total_memory // 1024**3}GB")
-            except Exception:
-                pass
+    def _select_computation_device(self):
+        return self._select_device()
 
-        return torch_device
+    def _initialize_results_directory(self):
+        resume_path = self.config.get("resume")
 
-    def _create_result_dir(self) -> str:
-        resume_path = self.config.get("resume", None)
         if resume_path:
-            if os.path.isfile(resume_path):
-                result_dir = Path(resume_path).resolve().parent
-            elif os.path.isdir(resume_path):
-                result_dir = Path(resume_path).resolve()
-            else:
-                raise ValueError(f"Resume path does not exist: {resume_path}")
-            print(f"Resuming training, using existing result directory: {result_dir}")
-            return str(result_dir)
+            resume_path_obj = Path(resume_path)
+            if resume_path_obj.is_file():
+                resume_path_obj = resume_path_obj.parent
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
         model_name = self.config["model"]
         if model_name == "extranet_scalable":
-            model_name = f"{model_name}_{self.config.get('scalable_model_scale','tiny')}"
-        result_dir = Path("results") / f"{model_name}_{self.config['dataset']}_{timestamp}"
-        result_dir.mkdir(parents=True, exist_ok=True)
-        print(f"Results will be saved to: {result_dir}")
-        return str(result_dir)
+            model_name = (
+                model_name
+                + f"_{self.config.get('scalable_model_scale', 'tiny')}"
+            )
 
-    def _setup_logging(self) -> None:
-        log_file = os.path.join(self.result_dir, "training.log")
-        for handler in logging.root.handlers[:]:
-            logging.root.removeHandler(handler)
+        dir_path = (
+            Path("./results")
+            / f"{model_name}_{self.config['dataset']}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        )
+
+        dir_path.mkdir(parents=True, exist_ok=True)
+
+        return resume_path_obj, dir_path
+
+    def _create_results_directory_and_resume_path(self):
+        return self._initialize_results_directory()
+
+    def _initialize_logger(self):
+        log_file = str(self.results_directory) + "/training.log"
+
         logging.basicConfig(
             level=logging.INFO,
             format="%(asctime)s - %(levelname)s - %(message)s",
-            handlers=[logging.FileHandler(log_file, encoding="utf-8"), logging.StreamHandler()]
+            handlers=[
+                logging.FileHandler(log_file),
+                logging.StreamHandler()
+            ]
         )
+
         self.logger = logging.getLogger(__name__)
-        self.logger.info(f"Training started: {datetime.now()}")
-        self.logger.info(f"Result directory: {self.result_dir}")
 
-    def _prepare_datasets(self) -> None:
-        self.logger.info("=" * 60)
-        self.logger.info("Preparing datasets...")
+    def _setup_logging(self):
+        return self._initialize_logger()
 
-        pin_mem = (self.device.type == "cuda")
-        persistent = self.config.get("num_workers", 0) > 0
+    def _prepare_data_loaders(self):
 
         self.train_loader = load_data(
-            self.config["train_path"], self.config["batch_size"],
-            self.config["num_workers"], "train", self.config, pin_memory=pin_mem, persistent_workers=persistent
+            self.config["train_path"],
+            self.config["batch_size"],
+            self.config["num_workers"],
+            "train",
+            self.config,
         )
+
         self.val_loader = load_data(
-            self.config["val_path"], self.config["batch_size"],
-            self.config["num_workers"], "val", self.config, pin_memory=pin_mem, persistent_workers=persistent
-        )
-        self.test_loader = load_data(
-            self.config["test_path"], self.config["batch_size"],
-            self.config["num_workers"], "test", self.config, pin_memory=pin_mem, persistent_workers=persistent
+            self.config["val_path"],
+            self.config["batch_size"],
+            self.config["num_workers"],
+            "val",
+            self.config,
         )
 
-        self.class_names = self.train_loader.dataset.classes
-        self.num_classes = len(self.class_names)
+        self.class_names = getattr(self.train_loader.dataset, 'classes', None)
+        if self.class_names is None and hasattr(self.train_loader.dataset, 'targets'):
+            unique = sorted(set(self.train_loader.dataset.targets))
+            self.class_names = [str(x) for x in unique]
 
-        self.logger.info(f"Number of classes: {self.num_classes}")
-        self.logger.info(f"Class names: {self.class_names}")
-        self.logger.info(
-            f"Dataset sizes - train: {len(self.train_loader.dataset)}, "
-            f"val: {len(self.val_loader.dataset)}, test: {len(self.test_loader.dataset)}"
-        )
-        self.logger.info("=" * 60)
+        self.num_classes = len(self.class_names) if self.class_names is not None else 0
+        print("Dataset summary:")
+        print(f"  Number of classes: {self.num_classes}")
+        if self.class_names is not None:
+            print(f"  Class names: {self.class_names}")
 
-    def _build_model(self) -> None:
-        self.logger.info("=" * 60)
-        self.logger.info(f"Building model: {self.config['model']}")
+        train_samples = len(self.train_loader.dataset)
+        val_samples = len(self.val_loader.dataset)
+        print(f"  Training set samples: {train_samples}")
+        print(f"  Validation set samples: {val_samples}")
+        print(f"  Batch size: {self.config['batch_size']}")
+        print(f"  Data loader workers: {self.config.get('num_workers', 0)}")
+
+
+        try:
+            if hasattr(self.train_loader.dataset, 'targets'):
+                counts = np.bincount(np.array(self.train_loader.dataset.targets))
+                print("  Per-class sample counts (train):")
+                for idx, cnt in enumerate(counts):
+                    name = self.class_names[idx] if idx < len(self.class_names) else str(idx)
+                    print(f"    {idx}: {name} -> {cnt}")
+        except Exception:
+            pass
+
+    def _prepare_data_loaders_with_info(self):
+        return self._prepare_data_loaders()
+
+    def _construct_model(self):
+        extra_map = {
+            "extranet_ccse": models_module.ExtraNet_CCSE,
+            "extranet": models_module.ExtraNet,
+            "extranet_ccse_lite": models_module.ExtraNet_CCSE_Lite,
+            "extranet_scalable": (
+                lambda **k: models_module.ExtraNet_Scalable(
+                    scale=self.config.get("scalable_model_scale", "tiny"),
+                    **k
+                )
+            )
+        }
+
+        resnet_names = [
+            "ccse_resnet18", "ccse_resnet34", "ccse_resnet50", "ccse_resnet101", "ccse_resnet152",
+            "se_resnet18", "se_resnet34", "se_resnet50", "se_resnet101", "se_resnet152",
+            "resnet18", "resnet34", "resnet50", "resnet101", "resnet152"
+        ]
+
+        for name in resnet_names:
+            extra_map[name] = getattr(models_module, name)
+
+        model_key = self.config["model"].lower()
 
         input_channels = self.config.get("grayscale_output_channels", 3)
 
-        model_registry = {
-            "extranet_ccse": lambda: ExtraNet_CCSE(num_classes=self.num_classes, use_simple_fusion=True, input_channels=input_channels),
-            "extranet": lambda: ExtraNet(num_classes=self.num_classes, use_simple_fusion=True, input_channels=input_channels),
-            "extranet_ccse_lite": lambda: ExtraNet_CCSE_Lite(num_classes=self.num_classes, use_simple_fusion=True, input_channels=input_channels),
-            "extranet_scalable": lambda: ExtraNet_Scalable(scale=self.config.get("scalable_model_scale", "tiny"), num_classes=self.num_classes, input_channels=input_channels),
-            "ccse_resnet18": lambda: ccse_resnet18(num_classes=self.num_classes, input_channels=input_channels),
-            "ccse_resnet34": lambda: ccse_resnet34(num_classes=self.num_classes, input_channels=input_channels),
-            "ccse_resnet50": lambda: ccse_resnet50(num_classes=self.num_classes, input_channels=input_channels),
-            "ccse_resnet101": lambda: ccse_resnet101(num_classes=self.num_classes, input_channels=input_channels),
-            "ccse_resnet152": lambda: ccse_resnet152(num_classes=self.num_classes, input_channels=input_channels),
-            "se_resnet18": lambda: se_resnet18(num_classes=self.num_classes, input_channels=input_channels),
-            "se_resnet34": lambda: se_resnet34(num_classes=self.num_classes, input_channels=input_channels),
-            "se_resnet50": lambda: se_resnet50(num_classes=self.num_classes, input_channels=input_channels),
-            "se_resnet101": lambda: se_resnet101(num_classes=self.num_classes, input_channels=input_channels),
-            "se_resnet152": lambda: se_resnet152(num_classes=self.num_classes, input_channels=input_channels),
-            "resnet18": lambda: resnet18(num_classes=self.num_classes, input_channels=input_channels),
-            "resnet34": lambda: resnet34(num_classes=self.num_classes, input_channels=input_channels),
-            "resnet50": lambda: resnet50(num_classes=self.num_classes, input_channels=input_channels),
-            "resnet101": lambda: resnet101(num_classes=self.num_classes, input_channels=input_channels),
-            "resnet152": lambda: resnet152(num_classes=self.num_classes, input_channels=input_channels),
-        }
-
-        model_name = self.config["model"].lower()
-        if model_name not in model_registry:
-            raise ValueError(f"Unknown model: {model_name}. Available models: {list(model_registry.keys())}")
-
-        self.model = model_registry[model_name]().to(self.device)
-
-        if hasattr(torch, "compile") and self.config.get("use_torch_compile", False):
-            self.model = torch.compile(self.model)
-            self.logger.info("PyTorch 2.0 compilation enabled")
+        self.model = (
+            extra_map[model_key](
+                num_classes=self.num_classes,
+                input_channels=input_channels
+            )
+            .to(self.device)
+        )
 
         total_params = sum(p.numel() for p in self.model.parameters())
         trainable_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
 
-        self.logger.info(f"Total parameters: {total_params:,}, trainable parameters: {trainable_params:,}")
-        if self.use_amp:
-            self.logger.info("Mixed precision training (AMP) enabled")
+        print(f"Model: {self.config['model']}")
+        print(f"Input channels: {input_channels}")
+        print(f"Total parameters: {total_params:,}")
+        print(f"Trainable parameters: {trainable_params:,}")
 
-        model_summary_path = Path(self.result_dir) / "model_summary.txt"
-        with open(model_summary_path, "w", encoding="utf-8") as f:
-            f.write(f"Model: {self.config['model']}\n")
-            f.write(f"Total parameters: {total_params:,}\n")
-            f.write(f"Trainable parameters: {trainable_params:,}\n")
-            f.write(f"Mixed precision training (AMP): {self.use_amp}\n\n")
-            f.write(f"Model structure:\n{self.model}")
-
-        self.logger.info("=" * 60)
-
-    def _setup_training(self) -> None:
-        if self.config.get("use_class_weights", False) and self.loss_type in ["focal", "ce"]:
-            self.class_weights = torch.tensor(self.config["class_weights"], device=self.device)
-        else:
-            self.logger.warning(f"Class weights are not used for {self.loss_type} loss types")
-            self.class_weights = None
-            self.logger.info("Class weights are only used for focal and ce loss types")
-
-        self._build_loss_function(epoch=0)
-        self.logger.info(f"Loss function type: {self.loss_type}")
-        if self.dynamic_label_smoothing:
-            self.logger.info(f"Dynamic label smoothing enabled (base value={self.base_label_smoothing})")
-
-        self._setup_optimizer()
-        self._setup_scheduler()
-
-    def _setup_optimizer(self) -> None:
-        optimizer_configs = {
-            "adam": lambda: optim.Adam(
-                self.model.parameters(),
-                lr=self.config["lr"],
-                weight_decay=self.config["weight_decay"],
-                betas=tuple(self.config["betas"])
-            ),
-            "adamw": lambda: optim.AdamW(
-                self.model.parameters(),
-                lr=self.config["lr"],
-                weight_decay=self.config["weight_decay"],
-                betas=tuple(self.config["betas"])
-            ),
-            "sgd": lambda: optim.SGD(
-                self.model.parameters(),
-                lr=self.config["lr"],
-                weight_decay=self.config["weight_decay"],
-                momentum=self.config["momentum"]
-            )
-        }
-
-        optimizer_name = self.config["optimizer"]
-        if optimizer_name not in optimizer_configs:
-            raise ValueError(f"Unsupported optimizer: {optimizer_name}")
-
-        self.optimizer = optimizer_configs[optimizer_name]()
-        self.logger.info(f"Optimizer: {optimizer_name}")
-
-    def _setup_scheduler(self) -> None:
-        scheduler_configs = {
-            "cosine": lambda: optim.lr_scheduler.CosineAnnealingLR(
-                self.optimizer,
-                T_max=self.config["cosine_t_max"],
-                eta_min=self.config["cosine_eta_min"]
-            ),
-            "cosine_restarts": lambda: optim.lr_scheduler.CosineAnnealingWarmRestarts(
-                self.optimizer,
-                T_0=self.config["cosine_t_max"],
-                T_mult=self.config.get("cosine_T_mult", 1),
-                eta_min=self.config["cosine_eta_min"]
-            ),
-            "step": lambda: optim.lr_scheduler.StepLR(
-                self.optimizer,
-                step_size=self.config["step_size"],
-                gamma=self.config["gamma"]
-            ),
-            "plateau": lambda: optim.lr_scheduler.ReduceLROnPlateau(
-                self.optimizer,
-                mode="max",
-                patience=self.config["plateau_patience"],
-                factor=self.config["plateau_factor"]
-            )
-        }
-
-        scheduler_name = self.config["scheduler"]
-        if scheduler_name not in scheduler_configs:
-            raise ValueError(f"Unsupported learning rate scheduler: {scheduler_name}")
-
-        self.scheduler = scheduler_configs[scheduler_name]()
-        self.logger.info(f"Learning rate scheduler: {scheduler_name}")
-
-        self.warmup_epochs = self.config.get("warmup_epochs", 0) if self.config.get("use_warmup", False) else 0
-        if self.warmup_epochs > 0:
-            self.logger.info(f"Learning rate warmup: {self.warmup_epochs} epochs")
-
-    def _build_loss_function(self, epoch: int = 0) -> None:
-        smoothing = (
-            self.base_label_smoothing * (1 - epoch / max(1, self.config["epochs"]))
-            if self.dynamic_label_smoothing and self.loss_type == "kl"
-            else (self.base_label_smoothing if self.loss_type == "kl" else 0.0)
-        )
-
-        loss_configs = {
-            "focal": lambda: FocalLoss(gamma=self.config["focal_gamma"], alpha=self.class_weights).to(self.device),
-            "gce": lambda: GeneralizedCrossEntropy(num_classes=self.num_classes, q=self.config["gce_q"]).to(self.device),
-            "sce": lambda: SymmetricCrossEntropy(
-                num_classes=self.num_classes,
-                class_weights=self.class_weights,
-                alpha=self.config.get("sce_alpha", 0.1),
-                beta=self.config.get("sce_beta", 1.0),
-                ce_only_epochs=self.config.get("sce_ce_only_epochs", 8),
-                label_smoothing=self.base_label_smoothing
-            ).to(self.device),
-            "kl": lambda: KLLabelSmoothingLoss(classes=self.num_classes, smoothing=smoothing).to(self.device),
-            "ce": lambda: nn.CrossEntropyLoss(weight=self.class_weights, label_smoothing=self.base_label_smoothing).to(self.device)
-        }
-
-        assert self.loss_type in loss_configs, f"Unsupported loss type: {self.loss_type}"
-        self.criterion = loss_configs[self.loss_type]()
-        self._loss_fn = (lambda pred, target, epoch=None: self.criterion(pred, target, epoch)) if self.loss_type == "sce" else self.criterion
-
-        self.logger.info(f"Loss function: {self.loss_type}")
-        if self.loss_type == "kl" and self.dynamic_label_smoothing:
-            self.logger.info(f"Dynamic label smoothing (KL) updated to: {smoothing:.5f} (epoch {epoch+1})")
-
-    def _warmup_lr(self, epoch: int) -> None:
-        if epoch < self.warmup_epochs:
-            warmup_lr = self.config["lr"] * float(epoch + 1) / float(self.warmup_epochs)
-            for param_group in self.optimizer.param_groups:
-                param_group["lr"] = warmup_lr
-
-    def save_checkpoint(self, epoch: int, is_best: bool = False, note: Optional[str] = None) -> None:
-        ckpt = {
-            "epoch": epoch,
-            "model_state_dict": self.model.state_dict(),
-            "optimizer_state_dict": getattr(self, "optimizer", None).state_dict() if hasattr(self, "optimizer") else None,
-            "scheduler_state_dict": getattr(self, "scheduler", None).state_dict() if hasattr(self, "scheduler") else None,
-            "best_val_acc": self.best_val_acc,
-            "best_epoch": self.best_epoch,
-            "patience_counter": self.patience_counter,
-            "metrics": {
-                "train_losses": self.metrics.train_losses,
-                "train_accs": self.metrics.train_accs,
-                "val_losses": self.metrics.val_losses,
-                "val_accs": self.metrics.val_accs,
-                "learning_rates": self.metrics.learning_rates,
-            },
-            "rng_cpu_state": torch.get_rng_state(),
-            "numpy_state": np.random.get_state(),
-            "py_random_state": random.getstate(),
-        }
 
         try:
-            gen_state = self.rng.get_state()
-            ckpt["generator_state"] = gen_state.cpu() if isinstance(gen_state, torch.Tensor) else gen_state
+            trainable_pct = 100.0 * trainable_params / max(1, total_params)
+            print(f"Trainable params percent: {trainable_pct:.2f}%")
         except Exception:
-            ckpt["generator_state"] = None
+            pass
 
-        if torch.cuda.is_available():
-            try:
-                cuda_states = torch.cuda.get_rng_state_all()
-                ckpt["cuda_rng_states"] = [s.cpu() for s in cuda_states]
-            except Exception:
-                ckpt["cuda_rng_states"] = None
+        if self.config.get("use_torch_compile") and hasattr(torch, "compile"):
+            self.model = torch.compile(self.model)
+            print("Using PyTorch compile mode")
 
-        if self.use_amp and getattr(self, "scaler", None) is not None:
-            try:
-                ckpt["scaler_state_dict"] = self.scaler.state_dict()
-            except Exception:
-                ckpt["scaler_state_dict"] = None
+    def _build_model_architecture(self):
+        return self._construct_model()
 
-        if note:
-            ckpt["note"] = note
-
-        latest_path = Path(self.result_dir) / "latest_checkpoint.pth"
-        torch.save(ckpt, latest_path)
-        self.logger.info(f"Saved latest checkpoint: {latest_path}")
-
-        if is_best:
-            best_model_path = Path(self.result_dir) / "best_model.pth"
-            torch.save(self.model.state_dict(), best_model_path)
-            best_full_path = Path(self.result_dir) / "best_checkpoint.pth"
-            torch.save(ckpt, best_full_path)
-            self.logger.info(f"Saved best model and checkpoint: {best_model_path}, {best_full_path}")
-
-    def load_checkpoint(self, checkpoint_path: str) -> int:
-        
-        path = Path(checkpoint_path)
-        if path.is_dir():
-            path = path / "latest_checkpoint.pth"
-        if not path.exists():
-            raise FileNotFoundError(f"Checkpoint not found: {path}")
-
-        ckpt = torch.load(path, map_location=self.device)
-
-        if "model_state_dict" in ckpt and ckpt["model_state_dict"] is not None:
-            try:
-                self.model.load_state_dict(ckpt["model_state_dict"])
-            except Exception as e:
-                self.logger.warning(f"Model state load warning: {e}")
-                self.model.load_state_dict(ckpt["model_state_dict"], strict=False)
-
-        if "optimizer_state_dict" in ckpt and hasattr(self, "optimizer") and ckpt["optimizer_state_dict"] is not None:
-            try:
-                self.optimizer.load_state_dict(ckpt["optimizer_state_dict"])
-            except Exception as e:
-                self.logger.warning(f"Failed to restore optimizer state: {e}")
-
-        if "scheduler_state_dict" in ckpt and hasattr(self, "scheduler") and ckpt["scheduler_state_dict"] is not None:
-            try:
-                self.scheduler.load_state_dict(ckpt["scheduler_state_dict"])
-            except Exception as e:
-                self.logger.warning(f"Failed to restore scheduler state: {e}")
-
-        if self.use_amp and getattr(self, "scaler", None) is not None and "scaler_state_dict" in ckpt:
-            try:
-                self.scaler.load_state_dict(ckpt.get("scaler_state_dict"))
-            except Exception as e:
-                self.logger.warning(f"Failed to restore AMP scaler: {e}")
-
-        if "rng_cpu_state" in ckpt and ckpt["rng_cpu_state"] is not None:
-            try:
-                torch.set_rng_state(ckpt["rng_cpu_state"])
-            except Exception as e:
-                self.logger.warning(f"Failed to set CPU RNG state: {e}")
-
-        if "cuda_rng_states" in ckpt and torch.cuda.is_available() and ckpt["cuda_rng_states"] is not None:
-            try:
-                cuda_states = ckpt["cuda_rng_states"]
-                cuda_states = [s.to("cuda") if isinstance(s, torch.Tensor) else s for s in cuda_states]
-                torch.cuda.set_rng_state_all(cuda_states)
-            except Exception as e:
-                self.logger.warning(f"Failed to set CUDA RNG state: {e}")
-
-        if "numpy_state" in ckpt and ckpt["numpy_state"] is not None:
-            try:
-                np.random.set_state(ckpt["numpy_state"])
-            except Exception as e:
-                self.logger.warning(f"Failed to set numpy RNG state: {e}")
-
-        if "py_random_state" in ckpt and ckpt["py_random_state"] is not None:
-            try:
-                random.setstate(ckpt["py_random_state"])
-            except Exception as e:
-                self.logger.warning(f"Failed to set python RNG state: {e}")
-
-        if "generator_state" in ckpt and ckpt["generator_state"] is not None:
-            try:
-                gen_state = ckpt["generator_state"]
-                if isinstance(gen_state, torch.Tensor):
-                    target_device = getattr(self, "rng_device", torch.device("cpu"))
-                    gen_state = gen_state.to(target_device)
-                self.rng.set_state(gen_state)
-            except Exception as e:
-                self.logger.warning(f"Failed to restore torch.Generator state: {e}")
-
-        self.best_val_acc = ckpt.get("best_val_acc", self.best_val_acc)
-        self.best_epoch = ckpt.get("best_epoch", self.best_epoch)
-        self.patience_counter = ckpt.get("patience_counter", self.patience_counter)
-        metrics = ckpt.get("metrics", None)
-        if metrics:
-            self.metrics.train_losses = metrics.get("train_losses", [])
-            self.metrics.train_accs = metrics.get("train_accs", [])
-            self.metrics.val_losses = metrics.get("val_losses", [])
-            self.metrics.val_accs = metrics.get("val_accs", [])
-            self.metrics.learning_rates = metrics.get("learning_rates", [])
-
-        next_epoch = ckpt.get("epoch", 0) + 1
-        self.logger.info(f"Loaded checkpoint '{path}' -> resuming from epoch {next_epoch}")
-        return next_epoch
-
-    def train_epoch(self, epoch: int) -> Tuple[float, float]:
-        self.model.train()
-
-        if self.dynamic_label_smoothing and self.loss_type == "kl":
-            self._build_loss_function(epoch)
-
-        mixup_enabled = self.config.get("mixup_alpha", 0) > 0
-        cutmix_enabled = self.config.get("cutmix_alpha", 0) > 0
-        mixup_prob = self.config.get("mixup_prob", 0.5) if mixup_enabled else 0.0
-        cutmix_prob = self.config.get("cutmix_prob", 0.5) if cutmix_enabled else 0.0
-
-        running_loss = 0.0
-        correct = 0
-        total = 0
-
-        pbar = tqdm(self.train_loader, desc=f"Epoch {epoch+1}/{self.config['epochs']} [Train]", leave=False)
-
-        checkpoint_freq = self.config.get("checkpoint_freq", 0)
-
-        for batch_idx, (images, labels) in enumerate(pbar):
-            labels = labels.long().to(self.device, non_blocking=True)
-            images = images.to(self.device, non_blocking=True)
-
-            if labels.max() >= self.num_classes or labels.min() < 0:
-                raise ValueError(f"Invalid label range: min={labels.min().item()}, max={labels.max().item()}, expected range [0, {self.num_classes-1}]")
-
-            mixed, labels_a, labels_b, lam = self._apply_data_augmentation(
-                images, labels, mixup_enabled, cutmix_enabled, mixup_prob, cutmix_prob
+    def _configure_training_components(self, epoch=0):
+        class_weights_tensor = None
+        if (
+            self.config.get("use_class_weights")
+            and self.config["loss_type"] in ["focal", "ce", "sce"]
+        ):
+            class_weights_tensor = torch.tensor(
+                self.config["class_weights"],
+                device=self.device
             )
 
-            self.optimizer.zero_grad(set_to_none=True)
+        label_smoothing = self.config.get("label_smoothing", 0.0)
 
-            with autocast(enabled=self.use_amp, device_type=self.device.type):
-                outputs = self.model(images)
-                loss = self._compute_loss(outputs, labels, labels_a, labels_b, lam, mixed, epoch)
-            
-            if self.use_amp:
-                self.scaler.scale(loss).backward()
-                if self.config.get("gradient_clip", 0) > 0:
-                    self.scaler.unscale_(self.optimizer)
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config["gradient_clip"])
-                self.scaler.step(self.optimizer)
-                self.scaler.update()
-            else:
-                loss.backward()
-                if self.config.get("gradient_clip", 0) > 0:
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config["gradient_clip"])
-                self.optimizer.step()
+        if (
+            self.config.get("dynamic_label_smoothing")
+            and self.config["loss_type"] == "kl"
+        ):
+            label_smoothing *= (
+                1 - epoch / max(1, self.config["epochs"]) 
+            )
 
-            running_loss += loss.item() * images.size(0)
-            total += images.size(0)
-            correct += self._compute_accuracy(outputs, labels, labels_a, labels_b, lam, mixed)
+        losses = {
+            "focal": (
+                lambda: FocalLoss(gamma=self.config["focal_gamma"], alpha=class_weights_tensor)
+            ),
+            "gce": (
+                lambda: GeneralizedCrossEntropy(
+                    num_classes=self.num_classes,
+                    q=self.config["gce_q"]
+                )
+            ),
+            "sce": (
+                lambda: SymmetricCrossEntropy(
+                    num_classes=self.num_classes,
+                    class_weights=class_weights_tensor,
+                    alpha=self.config.get("sce_alpha", 0.1),
+                    beta=self.config.get("sce_beta", 1.0),
+                    ce_only_epochs=self.config.get("sce_ce_only_epochs", 8),
+                    label_smoothing=label_smoothing
+                )
+            ),
+            "kl": (
+                lambda: KLLabelSmoothingLoss(
+                    classes=self.num_classes,
+                    smoothing=label_smoothing
+                )
+            ),
+            "ce": (
+                lambda: nn.CrossEntropyLoss(
+                    weight=class_weights_tensor,
+                    label_smoothing=label_smoothing
+                )
+            )
+        }
 
-            if batch_idx % self.config.get("log_freq", 5) == 0:
-                current_loss = running_loss / total
-                current_acc = 100 * correct / total
-                pbar.set_postfix({"loss": f"{current_loss:.4f}", "acc": f"{current_acc:.2f}%"})
+        self.criterion = losses[self.config["loss_type"]]().to(self.device)
 
-            if checkpoint_freq > 0 and (batch_idx + 1) % checkpoint_freq == 0:
-                try:
-                    self.save_checkpoint(epoch, is_best=False, note=f"batch_{batch_idx+1}")
-                    self.logger.info(f"Saved batch checkpoint: epoch {epoch+1}, batch {batch_idx+1}")
-                except Exception as e:
-                    self.logger.error(f"Failed to save batch checkpoint: {e}")
+        optimizer_map = {
+            "adam": optim.Adam,
+            "adamw": optim.AdamW,
+            "sgd": optim.SGD
+        }
 
-        epoch_loss = running_loss / total
-        epoch_acc = correct / total
-        return epoch_loss, epoch_acc
+        optimizer_kwargs = {
+            "lr": self.config["lr"],
+            "weight_decay": self.config["weight_decay"]
+        }
 
-    def _apply_data_augmentation(self, images: torch.Tensor, labels: torch.Tensor,
-                                 mixup_enabled: bool, cutmix_enabled: bool,
-                                 mixup_prob: float, cutmix_prob: float) -> Tuple[bool, Optional[torch.Tensor], Optional[torch.Tensor], float]:
-        mixed, labels_a, labels_b, lam = False, None, None, 1.0
-
-        rand_vals = torch.rand(2, device=self.rng_device, generator=self.rng)
-        rand_val1, rand_val2 = rand_vals[0].item(), rand_vals[1].item()
-
-        aug_methods = []
-        if mixup_enabled and rand_val1 < mixup_prob:
-            aug_methods.append(("mixup", self.config["mixup_alpha"]))
-        if cutmix_enabled and rand_val2 < cutmix_prob:
-            aug_methods.append(("cutmix", self.config["cutmix_alpha"]))
-
-        if aug_methods:
-            idx = torch.randint(len(aug_methods), (1,), device=self.rng_device, generator=self.rng).item()
-            method, alpha = aug_methods[idx]
-            if method == "mixup":
-                images, labels_a, labels_b, lam = mixup_data(images, labels, alpha=alpha, device=self.device, generator=self.rng)
-            else:
-                images, labels_a, labels_b, lam = cutmix_data(images, labels, alpha=alpha, device=self.device, generator=self.rng)
-            mixed = True
-
-        return mixed, labels_a, labels_b, lam
-
-    def _compute_loss(self, outputs: torch.Tensor, labels: torch.Tensor,
-                      labels_a: Optional[torch.Tensor], labels_b: Optional[torch.Tensor],
-                      lam: float, mixed: bool, epoch: int) -> torch.Tensor:
-        if mixed:
-            return lam * self._loss_fn(outputs, labels_a, epoch) + (1 - lam) * self._loss_fn(outputs, labels_b, epoch)
-        return self._loss_fn(outputs, labels, epoch)
-
-    def _compute_accuracy(self, outputs: torch.Tensor, labels: torch.Tensor,
-                          labels_a: Optional[torch.Tensor], labels_b: Optional[torch.Tensor],
-                          lam: float, mixed: bool) -> int:
-        _, predicted = torch.max(outputs, 1)
-        if mixed:
-            correct = (lam * predicted.eq(labels_a).sum().float() + (1 - lam) * predicted.eq(labels_b).sum().float()).item()
+        if self.config["optimizer"] == "sgd":
+            optimizer_kwargs["momentum"] = self.config["momentum"]
         else:
-            correct = (predicted == labels).sum().item()
-        return int(correct)
+            optimizer_kwargs["betas"] = tuple(self.config["betas"])
 
-    def validate_epoch(self, epoch: int) -> Tuple[float, float, list, list]:
+        self.optimizer = optimizer_map[self.config["optimizer"]](
+            self.model.parameters(),
+            **optimizer_kwargs
+        )
+
+        scheduler_map = {
+            "cosine": (
+                lambda: optim.lr_scheduler.CosineAnnealingLR(
+                    self.optimizer,
+                    T_max=self.config["cosine_t_max"],
+                    eta_min=self.config["cosine_eta_min"]
+                )
+            ),
+            "cosine_restarts": (
+                lambda: optim.lr_scheduler.CosineAnnealingWarmRestarts(
+                    self.optimizer,
+                    T_0=self.config["cosine_t_max"],
+                    T_mult=self.config.get("cosine_T_mult", 1),
+                    eta_min=self.config["cosine_eta_min"]
+                )
+            ),
+            "step": (
+                lambda: optim.lr_scheduler.StepLR(
+                    self.optimizer,
+                    step_size=self.config["step_size"],
+                    gamma=self.config["gamma"]
+                )
+            ),
+            "plateau": (
+                lambda: optim.lr_scheduler.ReduceLROnPlateau(
+                    self.optimizer,
+                    mode="max",
+                    patience=self.config["plateau_patience"],
+                    factor=self.config["plateau_factor"]
+                )
+            )
+        }
+
+        self.scheduler = scheduler_map[self.config["scheduler"]]()
+
+    def _setup_loss_optimizer_scheduler(self, epoch=0):
+        return self._configure_training_components(epoch)
+
+    def save_checkpoint(self, epoch_index, is_best=False, note=""):
+        checkpoint = {
+            "epoch": epoch_index,
+            "model": self.model.state_dict(),
+            "optimizer": self.optimizer.state_dict(),
+            "scheduler": self.scheduler.state_dict(),
+            "best_acc": self.best_validation_accuracy,
+            "metrics": self.metrics,
+            "rng": torch.get_rng_state(),
+            "np": np.random.get_state(),
+            "py": random.getstate(),
+            "scaler": self.scaler.state_dict() if self.scaler else None
+        }
+
+        checkpoint_path = (
+            self.resume_path_obj
+            / f"{self.config['model']}_{self.config['dataset']}_latest.pth"
+        )
+
+        torch.save(checkpoint, checkpoint_path)
+
+        if is_best:
+            best_model_path = self.results_directory / "best_model.pth"
+            torch.save(self.model.state_dict(), best_model_path)
+            print(f" >>> new best model accuracy: {self.best_validation_accuracy:.8f} at epoch {epoch_index+1}, saved to {best_model_path}")
+
+    def load_checkpoint(self, path):
+        path_obj = Path(path)
+
+        if path_obj.is_dir():
+            path_obj = (
+                path_obj
+                / f"{self.config['model']}_{self.config['dataset']}_latest.pth"
+            )
+
+        checkpoint_data = torch.load(path_obj, map_location=self.device, weights_only=False)
+
+        self.model.load_state_dict(checkpoint_data["model"], strict=False)
+
+        if "optimizer" in checkpoint_data:
+            self.optimizer.load_state_dict(checkpoint_data["optimizer"])
+
+        if "scheduler" in checkpoint_data:
+            self.scheduler.load_state_dict(checkpoint_data["scheduler"])
+
+        if self.scaler and checkpoint_data.get("scaler"):
+            self.scaler.load_state_dict(checkpoint_data["scaler"])
+
+        self.best_validation_accuracy = checkpoint_data.get("best_acc", 0.0)
+
+        self.metrics = checkpoint_data.get("metrics", self.metrics)
+
+        return checkpoint_data["epoch"] + 1
+
+    def load_full_checkpoint(self, path):
+        return self.load_checkpoint(path)
+
+    def _execute_epoch(self, epoch_index, mode="train"):
+        if mode == "train":
+            self.model.train()
+        else:
+            self.model.eval()
+
+        data_loader = (
+            self.train_loader if mode == "train" else self.val_loader
+        )
+
+        total_loss = 0.0
+        total_correct = 0.0
+        total_samples = 0
+
+        print(f"  Starting {mode} phase with {len(data_loader)} batches...")
+        pbar = tqdm(data_loader, desc=f"Epoch {epoch_index+1} [{mode}]", leave=False)
+
+        batch_count = 0
+        for images, labels in pbar:
+            images = images.to(self.device, non_blocking=True)
+            labels = labels.long().to(self.device, non_blocking=True)
+
+            augmented_images = images
+            mixed = False
+            label_a = None
+            label_b = None
+            lam = 1.0
+
+            if mode == "train":
+                r1, r2 = torch.rand(2, generator=self.rng).tolist()
+                mixup_alpha = self.config.get("mixup_alpha", 0)
+                cutmix_alpha = self.config.get("cutmix_alpha", 0)
+
+                if mixup_alpha > 0 and r1 < self.config.get("mixup_prob", 0.5):
+                    augmented_images, label_a, label_b, lam = mixup_data(
+                        images, labels, mixup_alpha, self.device, self.rng
+                    )
+                    mixed = True
+
+                elif cutmix_alpha > 0 and r2 < self.config.get("cutmix_prob", 0.5):
+                    augmented_images, label_a, label_b, lam = cutmix_data(
+                        images, labels, cutmix_alpha, self.device, self.rng
+                    )
+                    mixed = True
+
+            with autocast(enabled=bool(self.scaler), device_type=self.device.type):
+                outputs = self.model(augmented_images)
+
+                if mixed:
+                    def mixed_loss_fn(pred, target):
+                        if isinstance(self.criterion, SymmetricCrossEntropy):
+                            return self.criterion(pred, target, epoch_index)
+                        return self.criterion(pred, target)
+
+                    loss = lam * mixed_loss_fn(outputs, label_a) + (
+                        (1 - lam) * mixed_loss_fn(outputs, label_b)
+                    )
+                else:
+                    if isinstance(self.criterion, SymmetricCrossEntropy):
+                        loss = self.criterion(outputs, labels, epoch_index)
+                    else:
+                        loss = self.criterion(outputs, labels)
+
+            if mode == "train":
+                self.optimizer.zero_grad(set_to_none=True)
+
+                if self.scaler:
+                    self.scaler.scale(loss).backward()
+
+                    if self.config.get("gradient_clip", 0) > 0:
+                        self.scaler.unscale_(self.optimizer)
+                        nn.utils.clip_grad_norm_(
+                            self.model.parameters(),
+                            self.config["gradient_clip"]
+                        )
+
+                    self.scaler.step(self.optimizer)
+                    self.scaler.update()
+                else:
+                    loss.backward()
+
+                    if self.config.get("gradient_clip", 0) > 0:
+                        nn.utils.clip_grad_norm_(
+                            self.model.parameters(),
+                            self.config["gradient_clip"]
+                        )
+
+                    self.optimizer.step()
+
+            total_loss += loss.item() * images.size(0)
+
+            _, predictions = outputs.max(1)
+
+            total_samples += images.size(0)
+
+            if mixed:
+                total_correct += (
+                    lam * predictions.eq(label_a).sum().item()
+                    + (1 - lam) * predictions.eq(label_b).sum().item()
+                )
+            else:
+                total_correct += predictions.eq(labels).sum().item()
+
+            batch_count += 1
+            if batch_count % max(1, len(data_loader) // 5) == 0:  # Print every 20% of batches
+                batch_acc = 100 * predictions.eq(labels).sum().item() / images.size(0)
+                print(f"    Batch {batch_count}/{len(data_loader)} - loss: {loss.item():.4f}, batch_acc: {batch_acc:.2f}%")
+
+            pbar.set_postfix(
+                loss=f"{total_loss/total_samples:.4f}",
+                accuracy=f"{100*total_correct/total_samples:.2f}%"
+            )
+
+        return total_loss / total_samples, total_correct / total_samples
+
+    def _evaluate_model(self):
         self.model.eval()
-
-        running_loss = 0.0
-        correct = 0
-        total = 0
+        all_predictions = []
         all_labels = []
-        all_preds = []
 
-        pbar = tqdm(self.val_loader, desc=f"Epoch {epoch+1}/{self.config['epochs']} [Val]", leave=False)
+        print(f"  Starting detailed evaluation with {len(self.val_loader)} batches...")
+        pbar = tqdm(self.val_loader, desc="Detailed Evaluation", leave=False)
 
         with torch.no_grad():
             for images, labels in pbar:
-                labels = labels.to(self.device, non_blocking=True)
                 images = images.to(self.device, non_blocking=True)
+                labels = labels.long().to(self.device, non_blocking=True)
 
-                with autocast(enabled=self.use_amp, device_type=self.device.type):
-                    outputs = self.model(images)
-                    loss = self._loss_fn(outputs, labels, epoch) if self.loss_type == "sce" else self._loss_fn(outputs, labels)
+                outputs = self.model(images)
+                _, predictions = outputs.max(1)
 
-                running_loss += loss.item() * labels.size(0)
-                _, predicted = torch.max(outputs, 1)
-                total += labels.size(0)
-                correct += (predicted == labels).sum().item()
-
+                all_predictions.extend(predictions.cpu().numpy())
                 all_labels.extend(labels.cpu().numpy())
-                all_preds.extend(predicted.cpu().numpy())
 
-                current_loss = running_loss / total
-                current_acc = 100 * correct / total
-                pbar.set_postfix({"loss": f"{current_loss:.4f}", "acc": f"{current_acc:.2f}%"})
+        return all_predictions, all_labels
 
-        epoch_loss = running_loss / total
-        epoch_acc = correct / total
-        return epoch_loss, epoch_acc, all_labels, all_preds
+    def run_training(self):
 
-    def train(self) -> None:
+        self._prepare_data_loaders()
+        self._construct_model()
+        self._configure_training_components()
+
+        with open(self.results_directory / "config.json", "w") as f:
+            json.dump(self.config, f, indent=4)
+
+        print(f"\n{'='*100}")
+        print(f"DETAILED TRAINING CONFIGURATION")
+        print(f"{'='*100}")
+        print(f"Model Architecture: {self.config['model']}")
+        print(f"Dataset: {self.config['dataset']}")
+        print(f"Total Training Epochs: {self.config['epochs']}")
+        print(f"Batch Size: {self.config['batch_size']}")
+        print(f"Initial Learning Rate: {self.config['lr']}")
+        print(f"Device: {self.device}")
+        print(f"Results Directory: {self.results_directory}")
+        print(f"Number of Classes: {self.num_classes}")
+        print(f"Number of Training Samples: {len(self.train_loader.dataset)}")
+        print(f"Number of Validation Samples: {len(self.val_loader.dataset)}")
+        print(f"Number of Training Batches: {len(self.train_loader)}")
+        print(f"Number of Validation Batches: {len(self.val_loader)}")
+        print(f"Number of Data Loader Workers: {self.config.get('num_workers', 0)}")
         
-        self._prepare_datasets()
-        self._build_model()
-        self._setup_training()
+        # Data augmentation settings
+        if self.config.get("mixup_alpha", 0) > 0:
+            print(f"Mixup Augmentation: Enabled (alpha={self.config['mixup_alpha']}, probability={self.config['mixup_prob']})")
+        if self.config.get("cutmix_alpha", 0) > 0:
+            print(f"Cutmix Augmentation: Enabled (alpha={self.config['cutmix_alpha']}, probability={self.config['cutmix_prob']})")
         
-        config_json_path = Path(self.result_dir) / "config.json"
-        with open(config_json_path, "w", encoding="utf-8") as f:
-            json.dump(self.config, f, indent=4, ensure_ascii=False)
+        # Regularization settings
+        if self.config.get("label_smoothing", 0) > 0:
+            print(f"Label Smoothing: {self.config['label_smoothing']}")
         
+        if self.config.get("gradient_clip", 0) > 0:
+            print(f"Gradient Clipping: {self.config['gradient_clip']}")
+        
+        if self.config.get("weight_decay", 0) > 0:
+            print(f"Weight Decay: {self.config['weight_decay']}")
+        
+        # Scheduler settings
+        if self.config.get("use_warmup", False):
+            print(f"Warmup Epochs: {self.config.get('warmup_epochs', 0)}")
+        
+        if self.config.get("scheduler", "step") != "step":
+            print(f"Learning Rate Scheduler: {self.config.get('scheduler')}")
+        
+        print(f"Early Stopping Patience: {self.config.get('patience', 50)} epochs")
+        print(f"{'='*100}")
+
         start_epoch = 0
-        resume_path = self.config.get("resume", None)
-        if resume_path:
+        self.training_start_time = time.time()  # Record start time for total training duration
+        if (
+            self.config.get("resume")
+            and not self.config.get("if_first_train", True)
+        ):
+            print(f"Resuming training from checkpoint: {self.config['resume']}")
+            start_epoch = self.load_checkpoint(self.config["resume"])
+            print(f"Successfully loaded checkpoint. Starting from epoch {start_epoch+1}")
+
+        self.logger.info(
+            f"Start training from epoch {start_epoch+1}"
+        )
+
+        total_epochs = self.config["epochs"]
+        print(f"Starting training for {total_epochs} epochs, resuming from epoch {start_epoch+1}")
+
+        for epoch_index in range(start_epoch, self.config["epochs"]):
+            current_lr = self.optimizer.param_groups[0]["lr"]
+            progress_percent = ((epoch_index+1)/total_epochs)*100
+            remaining_epochs = total_epochs - (epoch_index+1)
+            print(f"\n{'='*100}")
+            print(f"EPOCH {epoch_index+1}/{total_epochs} | Progress: {progress_percent:.1f}% | Remaining: {remaining_epochs} epochs")
+            print(f"Learning Rate: {current_lr:.8f} | Best Validation Accuracy: {self.best_validation_accuracy:.4f} (Epoch {self.best_epoch_index+1})")
+            print(f"Time Estimate: ~{remaining_epochs * 2:.1f} minutes remaining (approximate)")
+            print(f"{'='*100}")
+            
+            epoch_start_time = time.time()
+
+            if (
+                self.config.get("use_warmup")
+                and epoch_index < self.config.get("warmup_epochs", 0)
+            ):
+                lr = self.config["lr"] * (epoch_index + 1) / self.config["warmup_epochs"]
+                print(f"  Warmup Phase: Adjusting learning rate from {self.config['lr']:.8f} to {lr:.8f}")
+
+                for group in self.optimizer.param_groups:
+                    group["lr"] = lr
+
+            print(f"  Starting Training Phase...")
+            train_loss, train_acc = self._execute_epoch(epoch_index, "train")
+            print(f"  Training Phase Complete - Loss: {train_loss:.6f}, Accuracy: {train_acc:.4f}")
+            
+            print(f"  Starting Validation Phase...")
+            val_loss, val_acc = self._execute_epoch(epoch_index, "val")
+            print(f"  Validation Phase Complete - Loss: {val_loss:.6f}, Accuracy: {val_acc:.4f}")
+
+            epoch_duration = time.time() - epoch_start_time
+            remaining_epochs = max(0, total_epochs - (epoch_index + 1))
+            eta_seconds = epoch_duration * remaining_epochs
+            eta = time.strftime('%H:%M:%S', time.gmtime(eta_seconds))
+            print(f"Epoch {epoch_index+1} duration: {epoch_duration:.1f}s, ETA remaining: {eta}")
+
+            # GPU memory info if available
             try:
-                start_epoch = self.load_checkpoint(resume_path)
-            except Exception as e:
-                self.logger.error(f"Failed to load checkpoint for resume: {e}")
-                raise
+                if self.device.type == 'cuda':
+                    allocated = torch.cuda.memory_allocated(self.device)
+                    reserved = torch.cuda.memory_reserved(self.device)
+                    print(f"GPU memory - allocated: {allocated/1024**2:.1f}MB, reserved: {reserved/1024**2:.1f}MB")
+            except Exception:
+                pass
 
-        total_epochs = int(self.config["epochs"])
-        if start_epoch >= total_epochs:
-            self.logger.info(f"Start epoch ({start_epoch}) >= total epochs ({total_epochs}), nothing to do.")
-            return
+            self.metrics["train_loss"].append(train_loss)
+            self.metrics["train_accuracy"].append(train_acc)
 
-        self.logger.info("Starting training...")
-        self.logger.info("=" * 60)
+            self.metrics["val_loss"].append(val_loss)
+            self.metrics["val_accuracy"].append(val_acc)
 
-        start_time = time.time()
-        switch_epoch = self.config.get("switch_to_plateau_epoch", 999)
-        patience = self.config.get("patience", 50)
+            self.metrics["learning_rate"].append(self.optimizer.param_groups[0]["lr"])
 
-        try:
-            for epoch in range(start_epoch, total_epochs):
-                if self.config.get("use_warmup", False):
-                    self._warmup_lr(epoch)
+            train_improvement = train_acc - self.metrics["train_accuracy"][-2] if len(self.metrics["train_accuracy"]) > 1 else 0
+            val_improvement = val_acc - self.metrics["val_accuracy"][-2] if len(self.metrics["val_accuracy"]) > 1 else 0
+            
+            epoch_info = f"Epoch {epoch_index+1:03d} | Training Loss: {train_loss:.6f} Accuracy: {train_acc:.4f} (Δ: {train_improvement:+.4f}) | Validation Loss: {val_loss:.6f} Accuracy: {val_acc:.4f} (Δ: {val_improvement:+.4f})"
+            print(f"  {epoch_info}")
+            
+            self.logger.info(epoch_info)
 
-                train_loss, train_acc = self.train_epoch(epoch)
-                val_loss, val_acc, val_labels, val_preds = self.validate_epoch(epoch)
-                
-                self.metrics.train_losses.append(train_loss)
-                self.metrics.train_accs.append(train_acc)
-                self.metrics.val_losses.append(val_loss)
-                self.metrics.val_accs.append(val_acc)
-                current_lr = self.optimizer.param_groups[0]["lr"]
-                self.metrics.learning_rates.append(current_lr)
-
-                self.logger.info(
-                    f"Epoch {epoch+1:03d}/{total_epochs} | "
-                    f"Train Loss: {train_loss:.4f} Acc: {train_acc:.4f} | "
-                    f"Val Loss: {val_loss:.4f} Acc: {val_acc:.4f} | "
-                    f"LR: {current_lr:.6f}"
+            if epoch_index == self.config.get("switch_to_plateau_epoch"):
+                self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+                    self.optimizer,
+                    mode="max",
+                    patience=self.config["plateau_patience"],
+                    factor=self.config["plateau_factor"]
                 )
+                print(f"Plateau scheduler initialized with patience {self.config['plateau_patience']} and factor {self.config['plateau_factor']}")
 
-                
-                self._update_scheduler(epoch, val_acc, switch_epoch)
-                
-                improved = val_acc > self.best_val_acc
-                if improved:
-                    self.best_val_acc = val_acc
-                    self.best_epoch = epoch
-                    self.patience_counter = 0
-                else:
-                    self.patience_counter += 1
-                
-                try:
-                    self.save_checkpoint(epoch, is_best=improved)
-                except Exception as e:
-                    self.logger.error(f"Failed to save checkpoint at epoch {epoch+1}: {e}")
-
-                if self.patience_counter >= patience:
-                    self.logger.info(f"Early stopping triggered after {self.patience_counter} epochs without improvement")
-                    break
-
-        except KeyboardInterrupt:
-            try:
-                self.save_checkpoint(epoch, is_best=False, note="interrupted_by_user")
-                self.logger.info(f"Training interrupted by user, checkpoint saved at epoch {epoch+1}")
-            except Exception as e:
-                self.logger.error(f"Failed to save checkpoint after interrupt: {e}")
-            raise
-
-        except Exception as e:
-            self.logger.error(f"Unhandled exception during training: {e}", exc_info=True)
-            try:
-                self.save_checkpoint(epoch, is_best=False, note="crash_checkpoint")
-                self.logger.info(f"Saved crash checkpoint at epoch {epoch+1}")
-            except Exception as se:
-                self.logger.error(f"Failed to save crash checkpoint: {se}")
-            raise
-
-        finally:
-            total_time = time.time() - start_time
-            self.logger.info("=" * 60)
-            self.logger.info(f"Training finished. Total time: {total_time/3600:.2f} hours")
-            self.logger.info(f"Best validation accuracy: {self.best_val_acc:.4f} (epoch {self.best_epoch+1})")
-            self.logger.info("=" * 60)
-
-            try:
-                self._save_visualizations()
-            except Exception as e:
-                self.logger.error(f"Failed to save training visualizations: {e}")
-
-            try:
-                self._save_confusion_matrix()
-            except Exception as e:
-                self.logger.error(f"Failed to save confusion matrix/report: {e}")
-
-            self.logger.info(f"All results saved to: {self.result_dir}")
-            self.logger.info(f"Best model: {Path(self.result_dir) / 'best_model.pth'}")
-
-    def _update_scheduler(self, epoch: int, val_acc: float, switch_epoch: int) -> None:
-        if epoch == switch_epoch:
-            self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-                self.optimizer, mode="max",
-                patience=self.config["plateau_patience"],
-                factor=self.config["plateau_factor"]
-            )
-            self.logger.info(
-                f"Switching learning rate scheduler to ReduceLROnPlateau (epoch {epoch+1}, "
-                f"patience={self.config['plateau_patience']}, factor={self.config['plateau_factor']})"
-            )
-
-        if isinstance(self.scheduler, optim.lr_scheduler.ReduceLROnPlateau):
-            self.scheduler.step(val_acc)
-        elif epoch >= self.warmup_epochs:
-            try:
+            if isinstance(self.scheduler, optim.lr_scheduler.ReduceLROnPlateau):
+                self.scheduler.step(val_acc)
+            else:
                 self.scheduler.step()
-            except TypeError:
-                self.scheduler.step(epoch)
 
-    def _save_visualizations(self) -> None:
-        fig, axes = plt.subplots(2, 2, figsize=(15, 12))
-        epochs = range(1, len(self.metrics.train_losses) + 1)
+            is_best_now = val_acc > self.best_validation_accuracy
 
-        axes[0, 0].plot(epochs, self.metrics.train_losses, label="Train Loss", linewidth=2)
-        axes[0, 0].plot(epochs, self.metrics.val_losses, label="Val Loss", linewidth=2)
-        axes[0, 0].set_xlabel("Epoch")
-        axes[0, 0].set_ylabel("Loss")
-        axes[0, 0].set_title("Training and Validation Loss")
-        axes[0, 0].legend()
-        axes[0, 0].grid(True, alpha=0.3)
+            if is_best_now:
+                self.best_validation_accuracy = val_acc
+                self.best_epoch_index = epoch_index
+                self.early_stop_counter = 0
+            else:
+                self.early_stop_counter += 1
 
-        train_acc_pct = [acc * 100 for acc in self.metrics.train_accs]
-        val_acc_pct = [acc * 100 for acc in self.metrics.val_accs]
-        axes[0, 1].plot(epochs, train_acc_pct, label="Train Acc", linewidth=2)
-        axes[0, 1].plot(epochs, val_acc_pct, label="Val Acc", linewidth=2)
-        axes[0, 1].set_xlabel("Epoch")
-        axes[0, 1].set_ylabel("Accuracy (%)")
-        axes[0, 1].set_title("Training and Validation Accuracy")
-        axes[0, 1].legend()
-        axes[0, 1].grid(True, alpha=0.3)
-        axes[0, 1].axhline(y=self.best_val_acc * 100, color="r", linestyle="--", alpha=0.7)
-        axes[0, 1].legend()
+            self.save_checkpoint(epoch_index, is_best_now)
 
-        axes[1, 0].plot(epochs, self.metrics.learning_rates, linewidth=2, color="green")
-        axes[1, 0].set_xlabel("Epoch")
-        axes[1, 0].set_ylabel("Learning Rate")
-        axes[1, 0].set_title("Learning Rate Schedule")
-        axes[1, 0].set_yscale("log")
-        axes[1, 0].grid(True, alpha=0.3)
+            if self.early_stop_counter >= self.config.get("patience", 50):
+                print(f"\nEarly stopping triggered after {epoch_index+1} epochs. No improvement for {self.early_stop_counter} epochs.")
+                break
 
-        axes[1, 1].plot(epochs, train_acc_pct, "o-", label="Train Acc", linewidth=2, markersize=3)
-        axes[1, 1].plot(epochs, val_acc_pct, "s-", label="Val Acc", linewidth=2, markersize=3)
-        axes[1, 1].fill_between(epochs, train_acc_pct, val_acc_pct, alpha=0.2, label="Gap")
-        axes[1, 1].set_xlabel("Epoch")
-        axes[1, 1].set_ylabel("Accuracy (%)")
-        axes[1, 1].set_title("Overfitting Analysis")
-        axes[1, 1].legend()
-        axes[1, 1].grid(True, alpha=0.3)
+        print(f"\n{'='*60}")
+        print(f"TRAINING COMPLETED")
+        print(f"Total epochs run: {epoch_index+1}")
+        print(f"Best validation accuracy: {self.best_validation_accuracy:.4f} at epoch {self.best_epoch_index+1}")
+        print(f"Final validation accuracy: {val_acc:.4f}")
+        print(f"Final training accuracy: {train_acc:.4f}")
+        print(f"Results saved to: {self.results_directory}")
+        print(f"{'='*60}")
+        
+        self._finalize_and_save_results()
 
-        plt.tight_layout()
-        plt.savefig(Path(self.result_dir) / "training_history.png", dpi=200, bbox_inches="tight")
-        plt.close()
-        self.logger.info("Training visualization results saved")
+    def _finalize_and_save_results(self):
+        print(f"Saving final checkpoint and results...")
+        self.save_checkpoint(self.best_epoch_index, note="final")
 
-    def _save_confusion_matrix(self) -> None:
-        self.logger.info("Generating confusion matrix...")
-        best_path = os.path.join(self.result_dir, "best_model.pth")
-        if not os.path.exists(best_path):
-            self.logger.warning("Best model not found for confusion matrix generation.")
-            return
+        fig, ax = plt.subplots(1, 2, figsize=(12, 5))
 
-        self.model.load_state_dict(torch.load(best_path, map_location=self.device))
-        self.model.eval()
-        all_labels, all_preds = [], []
-        with torch.no_grad():
-            for images, labels in tqdm(self.val_loader, desc="Evaluating", leave=False):
-                images = images.to(self.device, non_blocking=True)
-                with autocast(enabled=self.use_amp, device_type=self.device.type):
-                    outputs = self.model(images)
-                _, predicted = torch.max(outputs, 1)
-                all_labels.extend(labels.numpy())
-                all_preds.extend(predicted.cpu().numpy())
+        epochs = range(1, len(self.metrics["train_loss"]) + 1)
 
-        cm = confusion_matrix(all_labels, all_preds)
+        ax[0].plot(epochs, self.metrics["train_loss"], label="Train")
+        ax[0].plot(epochs, self.metrics["val_loss"], label="Val")
+        ax[0].legend()
+        ax[0].set_title("Loss")
+
+        ax[1].plot(epochs, self.metrics["train_accuracy"], label="Train")
+        ax[1].plot(epochs, self.metrics["val_accuracy"], label="Val")
+        ax[1].legend()
+        ax[1].set_title("Acc")
+
+        history_path = self.results_directory / "history.png"
+        plt.savefig(history_path)
+        print(f"Training history plot saved to: {history_path}")
+
+        print(f"Generating detailed evaluation metrics...")
+        all_predictions, all_labels = self._evaluate_model()
+        
+        avg_train_acc = sum(self.metrics['train_accuracy']) / len(self.metrics['train_accuracy'])
+        avg_val_acc = sum(self.metrics['val_accuracy']) / len(self.metrics['val_accuracy'])
+        max_train_acc = max(self.metrics['train_accuracy'])
+        max_val_acc = max(self.metrics['val_accuracy'])
+        
+        improvement_from_start = self.metrics['val_accuracy'][-1] - self.metrics['val_accuracy'][0]
+        
+        detailed_accuracy = accuracy_score(all_labels, all_predictions)
+        detailed_f1_score = f1_score(all_labels, all_predictions, average='weighted')
+        
+        total_training_time = time.time() - self.training_start_time
+        total_training_time_str = time.strftime('%H:%M:%S', time.gmtime(total_training_time))
+        
+        cm = confusion_matrix(all_labels, all_predictions)
         plt.figure(figsize=(10, 8))
-        sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", xticklabels=self.class_names, yticklabels=self.class_names, cbar_kws={"label": "Count"})
-        plt.title(f"Confusion Matrix - {self.config['model']}\nValidation Accuracy: {self.best_val_acc:.4f}", fontsize=14)
-        plt.xlabel("Predicted Label", fontsize=12)
-        plt.ylabel("True Label", fontsize=12)
-        plt.xticks(rotation=45, ha="right")
-        plt.yticks(rotation=0)
-        plt.tight_layout()
-        plt.savefig(os.path.join(self.result_dir, "confusion_matrix.png"), dpi=200, bbox_inches="tight")
+        sns.heatmap(
+            cm, 
+            annot=True, 
+            fmt='d', 
+            cmap='Blues',
+            xticklabels=self.class_names if self.class_names else [f'Class {i}' for i in range(self.num_classes)],
+            yticklabels=self.class_names if self.class_names else [f'Class {i}' for i in range(self.num_classes)]
+        )
+        plt.title('Confusion Matrix')
+        plt.xlabel('Predicted Label')
+        plt.ylabel('True Label')
+        cm_path = self.results_directory / "confusion_matrix.png"
+        plt.savefig(cm_path)
         plt.close()
-
-        report = classification_report(all_labels, all_preds, target_names=self.class_names, digits=4, zero_division=1)
-        accuracy = accuracy_score(all_labels, all_preds)
-        f1 = f1_score(all_labels, all_preds, average="weighted", zero_division=1)
-        with open(os.path.join(self.result_dir, "classification_report.txt"), "w", encoding="utf-8") as f:
-            f.write("=" * 60 + "\nValidation Set (PublicTest) Classification Report\n" + "=" * 60 + "\n")
-            f.write(f"Model: {self.config['model']}\nDataset: {self.config['dataset']}\nBest Epoch: {self.best_epoch + 1}\nValidation Size: {len(all_labels)} (PublicTest)\n")
-            f.write(f"Total Parameters: {sum(p.numel() for p in self.model.parameters()):,}\nMixed Precision (AMP): {self.use_amp}\n\n")
-            f.write(f"PublicTest Accuracy: {accuracy:.6f}\nWeighted F1 Score: {f1:.6f}\n\nDetailed Classification Report:\n{report}\n\nConfusion Matrix:\n{cm}")
-        self.logger.info(f"Confusion matrix and classification report saved\nPublicTest Accuracy: {accuracy:.6f}\nWeighted F1 Score: {f1:.6f}")
-
-def parse_args():
-    parser = argparse.ArgumentParser(description="General Classification Training Script")
-    parser.add_argument("--config", type=str, default="config.yaml", help="Path to YAML config file (default: config.yaml)")
-    parser.add_argument("--model", type=str, default=None, help="Model name (overrides config)")
-    parser.add_argument("--epochs", type=int, default=None, help="Number of training epochs (overrides config)")
-    parser.add_argument("--batch_size", type=int, default=None, help="Batch size (overrides config)")
-    parser.add_argument("--lr", type=float, default=None, help="Learning rate (overrides config)")
-    parser.add_argument("--resume", type=str, default=None, help="Path to checkpoint file or directory to resume training")
-    return parser.parse_args()
+        print(f"Confusion matrix saved to: {cm_path}")
+        
+        report = classification_report(
+            all_labels, 
+            all_predictions, 
+            target_names=self.class_names if self.class_names else [f'Class {i}' for i in range(self.num_classes)],
+            output_dict=True
+        )
+        
+        report_path = self.results_directory / "classification_report.txt"
+        with open(report_path, 'w') as f:
+            f.write(report_text)
+        print(f"Classification report saved to: {report_path}")
+        
+        
+        final_msg = (
+            f"\n{'='*100}\n"
+            f"TRAINING COMPLETED SUCCESSFULLY!\n"
+            f"{'='*100}\n"
+            f"Best Validation Accuracy: {self.best_validation_accuracy:.4f} at Epoch {self.best_epoch_index+1}\n"
+            f"Final Training Accuracy: {self.metrics['train_accuracy'][-1]:.4f}\n"
+            f"Final Validation Accuracy: {self.metrics['val_accuracy'][-1]:.4f}\n"
+            f"Detailed Accuracy (recomputed): {detailed_accuracy:.4f}\n"
+            f"Weighted F1 Score: {detailed_f1_score:.4f}\n"
+            f"Average Training Accuracy: {avg_train_acc:.4f}\n"
+            f"Average Validation Accuracy: {avg_val_acc:.4f}\n"
+            f"Highest Training Accuracy: {max_train_acc:.4f}\n"
+            f"Highest Validation Accuracy: {max_val_acc:.4f}\n"
+            f"Improvement from Start: {improvement_from_start:+.4f}\n"
+            f"Total Training Time: {total_training_time_str} (HH:MM:SS)\n"
+            f"Results saved to: {self.results_directory}\n"
+            f"{'='*100}\n"
+            f"DETAILED CLASSIFICATION REPORT:\n"
+            f"{'-'*100}\n"
+            f"{report}\n"
+            f"{'-'*100}"
+        )
+        print(final_msg)
+        self.logger.info(final_msg)
 
 def main():
-    args = parse_args()
+    p = argparse.ArgumentParser(description="Train and validate a deep learning classification model on custom datasets.")
+    p.add_argument("--config", default="config.yaml", type=str, help="Path to config file (YAML or JSON).")
 
-    if os.path.exists(args.config):
-        cfg = load_config(args.config)
-    else:
-        print(f"Warning: Config file {args.config} not found, using default configuration")
-        cfg = get_defaults()
+    p.add_argument("--model", type=str, help="Model architecture name (e.g., 'resnet18', 'ccse_resnet50').")
+    p.add_argument("--epochs", type=int, help="Number of total training epochs to run.")
+    p.add_argument("--batch_size", type=int, help="Batch size per optimizer step.")
+    p.add_argument("--lr", type=float, help="Learning rate for optimizer.")
+    p.add_argument("--resume", type=str, help="Path to checkpoint to resume training from.")
 
-    if args.model:
-        cfg["model"] = args.model
-    if args.epochs:
-        cfg["epochs"] = args.epochs
-    if args.batch_size:
-        cfg["batch_size"] = args.batch_size
-    if args.lr:
-        cfg["lr"] = args.lr
-    if args.resume:
-        cfg["resume"] = args.resume
+    args = p.parse_args()
 
-    set_seed(cfg["seed"])
-    trainer = Trainer(cfg)
-    trainer.train()
+    config_dict = (
+        config.load_config(args.config)
+        if os.path.exists(args.config)
+        else config.get_defaults()
+    )
+
+    for key, value in vars(args).items():
+        if value is not None:
+            config_dict[key] = value
+
+    set_seed(config_dict["seed"])
+
+    Trainer(config_dict).run_training()
 
 if __name__ == "__main__":
     main()

@@ -1,176 +1,222 @@
-# CrossChannelSegmentationExcitationBlock Classification
+# CCSEBlock Classification
 
-This repository implements CrossChannelSegmentationExcitationBlock (CCSE) and various neural network architectures for image classification tasks. The project includes comprehensive experiments on multiple datasets including FER2013 emotion recognition, CIFAR-10, and CIFAR-100.
+This repository contains a comprehensive PyTorch training framework and model implementations for image classification experiments using CCSE (Combined Channel and Spatial Excitation) and related attention blocks. The project provides a modular, extensible architecture for training and evaluating deep learning models with advanced attention mechanisms.
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Features](#features)
+- [Project Structure](#project-structure)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Configuration](#configuration)
+- [Models](#models)
+- [Training Process](#training-process)
+- [Results and Evaluation](#results-and-evaluation)
+- [Advanced Features](#advanced-features)
+- [Contributing](#contributing)
+- [License](#license)
+- [Acknowledgments](#acknowledgments)
+
+## Overview
+
+CCSEBlock Classification is a research-oriented deep learning framework designed for experimenting with attention mechanisms in image classification tasks. The project implements various model architectures including ExtraNet variants with CCSE blocks, ResNet models with SE/CCSE modifications, and provides comprehensive training utilities with advanced features like MixUp, CutMix, label smoothing, and multiple loss functions.
 
 ## Features
 
-- **CrossChannelSegmentationExcitationBlock Implementation**: Novel attention mechanism for enhancing spatial and channel-wise feature interactions through cross-channel segmentation and excitation
-- **Multiple Model Architectures**:
-  - CCSE-ResNet variants (ResNet18, 34, 50, 101, 152)
-  - SE-ResNet variants with Squeeze-and-Excitation blocks
-  - ExtraNet series with CCSE enhancement
-  - Scalable ExtraNet architectures (pico, nano, tiny, base, large, xlarge, huge)
-- **Advanced Training Strategies**: Mixup, CutMix, Test-Time Augmentation (TTA)
-- **Loss Functions**: Symmetric Cross Entropy (SCE), Focal Loss, Generalized Cross Entropy (GCE), and more
-- **Data Augmentation**: Comprehensive pipeline with geometric and color transformations
-- **Performance Optimization**: Automatic Mixed Precision (AMP) and PyTorch compilation
-- **Experiment Tracking**: Automated logging, visualization, and model checkpointing
+- **Modular Architecture**: Clean, extensible codebase with clear separation of concerns
+- **Multiple Model Architectures**: Support for ExtraNet, ResNet, and custom attention blocks
+- **Advanced Training Techniques**: MixUp, CutMix, label smoothing, focal loss, and more
+- **Comprehensive Evaluation**: Detailed metrics, confusion matrices, and classification reports
+- **Flexible Configuration**: YAML-based configuration with extensive customization options
+- **Mixed Precision Training**: Automatic mixed precision support for faster training
+- **Model Checkpointing**: Resume training from saved checkpoints
+- **Early Stopping**: Automatic early stopping to prevent overfitting
+- **Rich Logging**: Detailed training logs and metrics visualization
 
-## Datasets
+## Project Structure
 
-The project supports multiple datasets:
-
-### FER2013 (Emotion Recognition)
-- 35,887 grayscale facial images
-- 7 emotion categories: Angry, Disgust, Fear, Happy, Neutral, Sad, Surprise
-- Challenging real-world dataset with significant class imbalance
-
-### CIFAR-10 & CIFAR-100
-- 60,000 32x32 color images
-- CIFAR-10: 10 classes, CIFAR-100: 100 classes
-- Standard benchmark datasets for image classification
-
-## Model Architectures
-
-### CrossChannelSegmentationExcitationBlock (CCSE)
-Core attention mechanism that enhances both spatial and channel dimensions through cross-channel segmentation and excitation, providing better feature representation learning by dividing channels into even and odd groups and applying cross-excitation between them.
-
-### ResNet Variants with CCSE
-- **CCSE-ResNet18/34/50/101/152**: ResNet architectures enhanced with CrossChannelSegmentationExcitationBlock
-- Superior performance compared to standard ResNet and SE-ResNet on various tasks
-
-### ExtraNet Series
-- **ExtraNet**: Base architecture with efficient residual connections
-- **ExtraNet_CCSE**: Enhanced with CrossChannelSegmentationExcitationBlock for better feature extraction
-- **ExtraNet_CCSE_Lite**: Lightweight version optimized for mobile deployment
-- **ExtraNet_Scalable**: Configurable model sizes from pico (minimal) to huge (comprehensive), including: pico, nano, tiny, base, large, xlarge, huge
+```
+CCSEBlock_classification/
+├── config.py                 # Configuration loading and defaults
+├── config.yaml              # Default configuration file
+├── dataset.py               # Dataset loading utilities and preprocessing
+├── train.py                 # Main training script with comprehensive logging
+├── model/                   # Model definitions and architectures
+│   ├── __init__.py
+│   └── [model files]
+├── utils/                   # Utility functions (losses, data augmentation, etc.)
+│   ├── __init__.py
+│   └── [utility files]
+├── results/                 # Training results, checkpoints, and logs (git-ignored)
+├── requirements.txt         # Python dependencies
+├── .gitignore              # Git ignore patterns for ML projects
+└── README.md               # This file
+```
 
 ## Installation
 
-### Prerequisites
-- Python 3.8+
-- PyTorch 2.0+
-- CUDA (recommended for GPU acceleration)
-
-### Setup
 1. Clone the repository:
 ```bash
 git clone https://github.com/yourusername/CCSEBlock_classification.git
 cd CCSEBlock_classification
 ```
 
-2. Install dependencies:
+2. Create a virtual environment (recommended):
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
+
+3. Install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
-3. (Optional) For development:
-```bash
-pip install pytest black isort flake8
-```
-
 ## Usage
 
-### Configuration
-All experiment parameters are defined in `config.yaml`:
+### Basic Training
 
-- **Model Settings**: Architecture selection, scaling parameters, CCSE block configuration
-- **Training Parameters**: Batch size, learning rate, epochs, optimizer settings
-- **Data Augmentation**: Transformation pipelines and probabilities
-- **Loss Functions**: Multiple loss options with customizable parameters
-- **Scheduler**: Learning rate scheduling with warmup and cosine annealing
-
-### Training
-Run training with default configuration:
-```bash
-python train.py
-```
-
-Run with custom configuration:
 ```bash
 python train.py --config config.yaml
 ```
 
-### Data Preparation
-Organize datasets in the following structure:
-```
-data/
-├── fer2013/
-│   ├── train/
-│   │   ├── angry/
-│   │   ├── disgust/
-│   │   ├── fear/
-│   │   ├── happy/
-│   │   ├── neutral/
-│   │   ├── sad/
-│   │   └── surprise/
-│   ├── val/
-│   └── test/
-├── cifar10/
-│   ├── train/
-│   └── test/
-└── cifar100/
-    ├── train/
-    └── test/
-```
+### Custom Configuration
 
-### Model Benchmarking
-Benchmark different model architectures:
 ```bash
-python utiles/model_benchmark.py
+# Override specific parameters via command line
+python train.py --model ccse_resnet50 --epochs 100 --batch_size 64 --lr 0.001
+
+# Use custom config file
+python train.py --config my_config.yaml
 ```
 
-## Key Components
+### Resume Training
 
-### CrossChannelSegmentationExcitationBlock Implementation (`model/CCSEBlock.py`)
-- Cross-Channel Segmentation and Excitation mechanism
-- Efficient attention computation through channel segmentation
-- Compatible with any CNN architecture
+```bash
+python train.py --resume /path/to/checkpoint.pth
+```
 
-### Training Features
-- **Advanced Loss Functions**: SCE for noisy labels, Focal Loss for class imbalance, GCE, and more
-- **Data Augmentation**: Random erasing, Gaussian blur, affine transformations
-- **Class Balancing**: Automatic class weight calculation for imbalanced datasets
-- **Early Stopping**: Prevents overfitting with configurable patience
-- **Mixed Precision Training**: Faster training with reduced memory usage
+## Configuration
 
-### Evaluation & Visualization
-- Comprehensive metrics: Accuracy, F1-Score, Precision, Recall
-- Confusion matrices with class-wise analysis
+The training process is controlled through `config.yaml` which supports the following key parameters:
+
+### Model Configuration
+- `model`: Model architecture (e.g., `resnet18`, `ccse_resnet50`, `extranet_ccse`)
+- `num_classes`: Number of output classes
+- `input_channels`: Input channel count (default: 3)
+
+### Training Parameters
+- `epochs`: Number of training epochs
+- `batch_size`: Batch size for training
+- `lr`: Initial learning rate
+- `optimizer`: Optimizer type (`adam`, `adamw`, `sgd`)
+- `weight_decay`: Weight decay for regularization
+
+### Data Augmentation
+- `mixup_alpha`: Alpha parameter for MixUp augmentation
+- `mixup_prob`: Probability of applying MixUp
+- `cutmix_alpha`: Alpha parameter for CutMix augmentation
+- `cutmix_prob`: Probability of applying CutMix
+
+### Advanced Features
+- `label_smoothing`: Label smoothing factor
+- `use_amp`: Enable automatic mixed precision
+- `gradient_clip`: Gradient clipping threshold
+- `patience`: Early stopping patience
+
+## Models
+
+The project includes several model architectures:
+
+### ExtraNet Variants
+- `extranet_ccse`: ExtraNet with CCSE blocks
+- `extranet_ccse_lite`: Lightweight version of ExtraNet with CCSE
+- `extranet`: Standard ExtraNet architecture
+- `extranet_scalable`: Scalable ExtraNet with different scales
+
+### ResNet Variants
+- Standard ResNet models: `resnet18`, `resnet34`, `resnet50`, etc.
+- SE-ResNet: `se_resnet18`, `se_resnet34`, etc. (with Squeeze-and-Excitation)
+- CCSE-ResNet: `ccse_resnet18`, `ccse_resnet34`, etc. (with CCSE blocks)
+
+### Custom Blocks
+- CCSE (Combined Channel and Spatial Excitation) blocks
+- Standard SE (Squeeze-and-Excitation) blocks
+- Configurable attention mechanisms
+
+## Training Process
+
+The training process includes several advanced features:
+
+### Data Augmentation
+- **MixUp**: Combines two training samples and their labels
+- **CutMix**: Combines images by cutting and pasting patches
+- **Standard augmentations**: Random cropping, flipping, normalization
+
+### Loss Functions
+- Cross-Entropy Loss (with label smoothing)
+- Focal Loss for handling class imbalance
+- Symmetric Cross-Entropy Loss
+- Generalized Cross-Entropy Loss
+- KL Divergence with Label Smoothing
+
+### Learning Rate Scheduling
+- Cosine Annealing
+- Cosine Annealing with Warm Restarts
+- Step Decay
+- Reduce on Plateau
+
+### Mixed Precision Training
+- Automatic mixed precision (AMP) for faster training
+- Gradient scaling to prevent underflow
+
+## Results and Evaluation
+
+The training process generates comprehensive results including:
+
+### Metrics
+- Training and validation loss
+- Training and validation accuracy
+- Learning rate tracking
+- Best model checkpoint
+
+### Visualizations
 - Training history plots (loss and accuracy curves)
-- Classification reports with detailed statistics
+- Confusion matrix heatmaps
+- Classification reports
 
-## Project Structure
+### Detailed Statistics
+- Best validation accuracy and epoch
+- Final training and validation accuracy
+- Average and maximum accuracy across epochs
+- Total training time
+- Improvement from start to finish
 
-```
-CCSEBlock_classification/
-├── config.py                 # Configuration management
-├── config.yaml              # Experiment configurations
-├── dataset.py               # Dataset loading and preprocessing
-├── train.py                # Main training script
-├── utils.py                # Utility functions and loss functions
-├── requirements.txt         # Python dependencies
-├── model/                  # Model architectures
-│   ├── CCSEBlock.py        # CrossChannelSegmentationExcitationBlock implementation
-│   ├── CCSE_ResNet.py      # CCSE-enhanced ResNet variants
-│   ├── SE_ResNet.py        # SE-ResNet baselines
-│   ├── ExtraNet*.py        # ExtraNet variants
-│   └── __init__.py
-├── utiles/                 # Utility scripts
-│   ├── model_benchmark.py  # Architecture benchmarking
-│   ├── loss.py            # Additional loss functions
-│   ├── calculate_class_weights.py
-│   └── check_model_type.py
-├── data/                   # Datasets (not included in repo)
-├── results/               # Experiment outputs (not included in repo)
-├── .gitignore             # Git ignore rules
-├── LICENSE                # License file
-└── README.md
-```
+### Output Files
+- Model checkpoints saved in `results/` directory
+- Training logs with detailed metrics
+- Configuration files for reproducibility
+- Performance plots and visualizations
+
+## Advanced Features
+
+### Class Weights
+Support for weighted loss functions to handle imbalanced datasets.
+
+### Warmup Scheduling
+Learning rate warmup for stable training initialization.
+
+### Dynamic Label Smoothing
+Adjustable label smoothing that changes during training.
+
+### Multiple Evaluation Metrics
+- Accuracy
+- F1 Score (weighted average)
+- Per-class precision and recall
+- Detailed classification reports
 
 ## Contributing
-
-We welcome contributions! Please follow these guidelines:
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
@@ -178,34 +224,15 @@ We welcome contributions! Please follow these guidelines:
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
-### Development Guidelines
-- Use black for code formatting
-- Add type hints for new functions
-- Include docstrings for all public functions
-- Add unit tests for new features
-- Update documentation for API changes
-
-## Citation
-
-If you use this code in your research, please cite:
-
-```bibtex
-@misc{crosschannelsegmentationexcitation2024,
-  title={CrossChannelSegmentationExcitationBlock: Cross-Channel Segmentation and Excitation for Image Classification},
-  author={Fu Bin},
-  year={2024},
-  publisher={GitHub},
-  journal={GitHub repository},
-  url={https://github.com/Fvn18/CCSEBlock_classification}
-}
-```
-
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## Acknowledgments
 
-- FER2013 dataset: [Goodfellow et al., 2013]
-- CIFAR datasets: [Krizhevsky et al., 2009]
 - PyTorch team for the excellent deep learning framework
+- Original ResNet authors for the foundational architecture
+- Squeeze-and-Excitation (SE) block authors
+- MixUp and CutMix authors for advanced data augmentation techniques
+- FER2013, CIFAR, and other dataset creators
+- The deep learning research community for continuous innovation

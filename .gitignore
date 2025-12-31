@@ -98,6 +98,62 @@ venv.bak/
 # mkdocs documentation
 /site
 
+# ML/DL specific
+*.pth
+*.pt
+*.ckpt
+*.model
+*.h5
+*.weights
+*.onnx
+*.pb
+
+# Data files
+*.csv
+*.jsonl
+*.parquet
+*.hdf5
+*.pkl
+*.pickle
+
+# Results and outputs
+results/
+checkpoints/
+checkpoint/
+output/
+outputs/
+logs/
+runs/
+wandb/
+
+# Virtual environments (already included but adding more)
+venv/
+env/
+ENV/
+.venv/
+.env/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE specific
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment specific
+*.log
+*.out
+*.txt
+
 # mypy
 .mypy_cache/
 .dmypy.json
