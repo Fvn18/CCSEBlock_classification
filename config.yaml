@@ -6,7 +6,7 @@ basic:
   use_amp: true
 
 model:
-  name: "resnet50"
+  name: "resnet18"
   scalable_model_scale: "null"
   use_torch_compile: false
 

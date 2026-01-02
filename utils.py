@@ -275,5 +275,3 @@ def cutmix_data(x: Tensor, y: Tensor, alpha: float = 1.0, device: Optional[str] 
     y_a, y_b = y, y[index]
     return mixed_x, y_a, y_b, lam
 
-def mixup_criterion(criterion_fn, pred, y_a, y_b, lam):
-    return lam * criterion_fn(pred, y_a) + (1 - lam) * criterion_fn(pred, y_b)
