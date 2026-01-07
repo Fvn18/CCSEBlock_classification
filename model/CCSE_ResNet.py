@@ -151,13 +151,6 @@ class CCSE_ResNet(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
-        input_shape = x.shape
-        is_tencrop = len(input_shape) == 5  
-        
-        if is_tencrop:
-            batch_size, num_crops = input_shape[0], input_shape[1]
-            x = x.view(batch_size * num_crops, *input_shape[2:])
-        
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
@@ -171,10 +164,6 @@ class CCSE_ResNet(nn.Module):
         x = self.avgpool(x)
         x = torch.flatten(x, 1)
         x = self.fc(x)
-        
-        if is_tencrop:
-            x = x.view(batch_size, num_crops, -1)
-            x = x.mean(dim=1)
         
         return x
 
