@@ -21,6 +21,15 @@ def worker_init_fn(worker_id: int, base_seed: int = 42) -> None:
     torch.manual_seed(worker_seed)
     os.environ['PYTHONHASHSEED'] = str(worker_seed)
 
+_global_seed = 42
+
+def set_global_seed(seed: int):
+    global _global_seed
+    _global_seed = seed
+
+def universal_worker_init_fn(worker_id: int) -> None:
+    worker_init_fn(worker_id, _global_seed)
+
 class UniversalLoader: 
     def __init__(self, config): 
         self.cfg = config 
@@ -30,6 +39,8 @@ class UniversalLoader:
         self.batch_size = config['training']['batch_size'] 
         self.num_workers = config['basic']['num_workers'] 
         self.seed = config['basic'].get('seed', 42)
+
+        set_global_seed(self.seed)
         
         stats = STATS.get(self.dataset_name, STATS['imagenet']) 
         self.mean, self.std = stats['mean'], stats['std'] 
@@ -72,18 +83,16 @@ class UniversalLoader:
         shuffle = (mode == 'train') 
         drop_last = (mode == 'train') 
         
-        if self.dataset_name == 'cifar10': 
-            dataset = datasets.CIFAR10( 
-                root=self.data_root, train=(mode == 'train'), 
-                download=True, transform=transform 
-            ) 
+        if self.dataset_name in ['cifar10', 'cifar100']: 
+            if mode == 'train': 
+                path = self.cfg['data']['train_path'] 
+            else: 
+                path = self.cfg['data']['val_path'] 
             
-        elif self.dataset_name == 'cifar100': 
-            dataset = datasets.CIFAR100( 
-                root=self.data_root, train=(mode == 'train'), 
-                download=True, transform=transform 
-            ) 
-            
+            if not os.path.exists(path): 
+                raise FileNotFoundError(f"Dataset path not found: {path}") 
+                
+            dataset = datasets.ImageFolder(root=path, transform=transform)
         else: 
             if mode == 'train': 
                 path = self.cfg['data']['train_path'] 
@@ -103,7 +112,7 @@ class UniversalLoader:
             pin_memory=True, 
             drop_last=drop_last, 
             persistent_workers=(self.num_workers > 0),
-            worker_init_fn=lambda worker_id: worker_init_fn(worker_id, self.seed)
+            worker_init_fn=universal_worker_init_fn if self.num_workers > 0 else None
         ) 
         
         return loader 

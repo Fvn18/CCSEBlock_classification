@@ -21,6 +21,7 @@ training:
   loss_type: "ce"      
   label_smoothing: 0.1 
   
+  mixup_prob: 0.5      
   mixup_alpha: 0.2 
   cutmix_alpha: 1.0    
 

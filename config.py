@@ -52,7 +52,7 @@ def flatten_config(config):
 def load_config(config_path): 
     if not os.path.exists(config_path): 
         print(f"Config file {config_path} not found. Using defaults.") 
-        return flatten_config(get_defaults()) 
+        return get_defaults() 
     
     with open(config_path, 'r', encoding='utf-8') as f: 
         config = yaml.safe_load(f) 
@@ -66,4 +66,4 @@ def load_config(config_path):
                 if k not in config[section]: 
                     config[section][k] = v 
                     
-    return flatten_config(config)
+    return config

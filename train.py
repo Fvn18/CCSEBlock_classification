@@ -100,16 +100,6 @@ class Trainer:
 
         self.model = self.model.to(self.device)
         
-        if summary is not None:
-            try:
-                input_size = (1, input_channels, self.config["data"]["img_size"], self.config["data"]["img_size"])
-                self.logger.info(f"Model Summary:\n{summary(self.model, input_size=input_size, verbose=False)}")
-            except:
-                self.logger.info(f"Model Architecture:\n{self.model}")
-        else:
-            self.logger.info(f"Model Architecture:\n{self.model}")
-            self.logger.info("To get detailed model summary, install torchinfo: pip install torchinfo")
-
         self.criterion = self._get_loss_fn()
         self.optimizer = self._get_optimizer()
         self.scheduler = self._get_scheduler()
@@ -160,13 +150,19 @@ class Trainer:
             mixed = False
             labels_a, labels_b, lam = None, None, 1.0
             
-            if do_mixup:
-                if cutmix_alpha > 0 and torch.rand(1).item() < 0.5:
-                     images, labels_a, labels_b, lam = cutmix_data(images, labels, cutmix_alpha, self.device)
-                     mixed = True
+            if do_mixup and torch.rand(1).item() < self.config["training"].get("mixup_prob", 0.5):
+                if cutmix_alpha > 0 and mixup_alpha > 0:
+                    if torch.rand(1).item() < 0.5:
+                        images, labels_a, labels_b, lam = cutmix_data(images, labels, cutmix_alpha, self.device)
+                    else:
+                        images, labels_a, labels_b, lam = mixup_data(images, labels, mixup_alpha, self.device)
+                    mixed = True
+                elif cutmix_alpha > 0:
+                    images, labels_a, labels_b, lam = cutmix_data(images, labels, cutmix_alpha, self.device)
+                    mixed = True
                 elif mixup_alpha > 0:
-                     images, labels_a, labels_b, lam = mixup_data(images, labels, mixup_alpha, self.device)
-                     mixed = True
+                    images, labels_a, labels_b, lam = mixup_data(images, labels, mixup_alpha, self.device)
+                    mixed = True
 
             self.optimizer.zero_grad(set_to_none=True)
 
@@ -242,7 +238,6 @@ class Trainer:
         epochs = self.config["training"]["epochs"]
         self.logger.info(f"Start Training for {epochs} epochs...")
         
-        # 打印表格头部
         self.logger.info(f"{'Epoch':<8} {'Train Loss':<12} {'Train Acc':<10} {'Val Loss':<10} {'Val Acc':<10} {'LR':<12}")
         self.logger.info("-" * 72)
         
@@ -254,10 +249,8 @@ class Trainer:
             train_loss, train_acc = self.train_one_epoch(epoch)
             val_loss, val_acc = self.evaluate()
             
-            # Update Scheduler
             self.scheduler.step()
-            
-            # Check Best
+
             is_best = val_acc > self.best_val_acc
             if is_best:
                 self.best_val_acc = val_acc
@@ -269,7 +262,6 @@ class Trainer:
             time_elapsed = time.time() - epoch_start_time
             lr = self.optimizer.param_groups[0]["lr"]
 
-            # 打印表格格式日志
             self.logger.info(
                 f"{epoch+1:03d}/{epochs:<4} "
                 f" {train_loss:<12.4f} {train_acc:<10.4f} "
@@ -277,10 +269,8 @@ class Trainer:
                 f" {lr:<12.6f}"
             )
             
-            # Save Checkpoint
             self.save_checkpoint(epoch, val_acc, is_best)
             
-            # Early Stopping
             patience = self.config["training"].get("patience", 20)
             if self.patience_counter >= patience:
                 self.logger.info(f"Early stopping at epoch {epoch+1}")
@@ -313,19 +303,42 @@ class Trainer:
         self.logger.info(f"  Weighted F1 score: {f1:.6f}")
         self.logger.info(f"  Total training time: {total_time/3600:.4f} hours")
         
-        # 添加模型架构信息
-        if summary is not None:
-            try:
-                input_size = (1, self.config.get("data", {}).get("grayscale_output_channels", 3), 
-                             self.config["data"]["img_size"], self.config["data"]["img_size"])
-                model_summary = summary(self.model, input_size=input_size, verbose=False)
-                self.logger.info(f"  Model Summary:\n{model_summary}")
-            except:
-                pass
+        import json
+        config_path = self.output_dir / "config.json"
+        with open(config_path, 'w') as f:
+            json.dump(self.config, f, indent=2)
+        
+        results_path = self.output_dir / "results.txt"
+        with open(results_path, 'w') as f:
+            f.write("Training Results Summary\n")
+            f.write("=" * 50 + "\n")
+            f.write(f"Model: {self.config['model']['name']}\n")
+            f.write(f"Dataset: {self.config['basic']['dataset']}\n")
+            f.write(f"Total parameters: {total_params:,}\n")
+            f.write(f"Trainable parameters: {trainable_params:,}\n")
+            f.write(f"Best validation accuracy: {self.best_val_acc:.6f} (epoch {self.best_epoch+1})\n")
+            f.write(f"Weighted F1 score: {f:.6f}\n")
+            f.write(f"Total training time: {total_time/3600:.4f} hours\n")
+            f.write(f"Final validation accuracy: {val_acc:.6f}\n")
+            f.write(f"Final training accuracy: {train_acc:.6f}\n")
+            f.write(f"Final training loss: {train_loss:.6f}\n")
+            f.write(f"Final validation loss: {val_loss:.6f}\n")
+        
+        last_model_path = self.output_dir / "last_model.pth"
+        torch.save({
+            'epoch': self.best_epoch,
+            'state_dict': self.model.state_dict(),
+            'optimizer': self.optimizer.state_dict(),
+            'scheduler': self.scheduler.state_dict(),
+            'best_val_acc': self.best_val_acc,
+        }, last_model_path)
         
         self.logger.info("=" * 72)
         self.logger.info(f"All results saved to: {self.output_dir}")
-        self.logger.info(f"Best model: {self.output_dir / 'best.pth'}")
+        self.logger.info(f"Configuration saved to: {config_path}")
+        self.logger.info(f"Results summary saved to: {results_path}")
+        self.logger.info(f"Best model saved to: {self.output_dir / 'best.pth'}")
+        self.logger.info(f"Last model saved to: {last_model_path}")
 
 
 if __name__ == "__main__":
