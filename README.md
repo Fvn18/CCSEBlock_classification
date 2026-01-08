@@ -17,8 +17,12 @@ A PyTorch implementation of Cross-Channel Segmentation Excitation (CCSE) Block f
 git clone <repository-url>
 cd CCSEBlock_classification
 
+# Create a virtual environment (recommended)
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
 # Install dependencies
-pip install -r requirements.yml
+pip install torch torchvision scikit-learn numpy matplotlib tqdm pyyaml
 ```
 
 ## Usage
@@ -97,12 +101,4 @@ The training script outputs:
 - numpy
 - matplotlib
 - tqdm
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Acknowledgments
-
-- Inspired by various attention mechanisms in computer vision
-- Built on top of PyTorch framework
+- pyyaml

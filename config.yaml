@@ -6,7 +6,8 @@ basic:
   use_amp: true 
 
 model: 
-  name: "resnet50"     
+  name: "resnet50"      
+  pretrained: true     
 
 data: 
   root: "E:/data"      

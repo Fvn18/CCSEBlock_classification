@@ -96,7 +96,11 @@ class Trainer:
         input_channels = self.config["data"].get("grayscale_output_channels", 3)
         
         model_cls = getattr(sys.modules[__name__], self.config['model']['name'])
-        self.model = model_cls(num_classes=self.num_classes, input_channels=input_channels)
+        self.model = model_cls(
+            num_classes=self.num_classes, 
+            input_channels=input_channels, 
+            pretrained=self.config["model"].get("pretrained", False)
+        )
 
         self.model = self.model.to(self.device)
         

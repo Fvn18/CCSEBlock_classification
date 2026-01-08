@@ -1,64 +1,46 @@
 import torch
 import torch.nn as nn
 
-class CrossChannelSegmentationExcitationBlock(nn.Module):
-    def __init__(self, channels, reduction=16):
-        super().__init__()
+class CrossChannelSegmentationExcitationBlock(nn.Module): 
+    def __init__(self, channels, reduction=16): 
+        super().__init__() 
+        self.half = channels // 2 
+        mid_channels = max(self.half // reduction, 1) 
+        
+        self.avg_pool = nn.AdaptiveAvgPool2d(1) 
+        
+        self.mlp_a = nn.Sequential( 
+            nn.Linear(channels - self.half, mid_channels, bias=False), 
+            nn.ReLU(inplace=True), 
+            nn.Linear(mid_channels, self.half, bias=False), 
+            nn.Sigmoid() 
+        ) 
+        self.mlp_b = nn.Sequential( 
+            nn.Linear(self.half, mid_channels, bias=False), 
+            nn.ReLU(inplace=True), 
+            nn.Linear(mid_channels, channels - self.half, bias=False), 
+            nn.Sigmoid() 
+        ) 
 
-        self.channels = channels
-        self.even_channels = channels // 2 * 2
-        self.half = self.even_channels // 2
+    def forward(self, x): 
+        b, c, h, w = x.shape 
+        
+        x_a = x[:, :self.half, :, :] 
+        x_b = x[:, self.half:, :, :] 
 
-        mid1 = max(self.half // reduction, 1)
-        mid2 = max(self.even_channels // reduction, 1)
-
-        self.avg_pool = nn.AdaptiveAvgPool2d(1)
-
-        self.mlp1 = nn.Sequential(
-            nn.Linear(self.half, mid1, bias=False),
-            nn.ReLU(inplace=True),
-            nn.Linear(mid1, self.half, bias=False),
-            nn.Sigmoid()
-        )
-
-        self.mlp2 = nn.Sequential(
-            nn.Linear(self.even_channels, mid2, bias=False),
-            nn.ReLU(inplace=True),
-            nn.Linear(mid2, self.half, bias=False),
-            nn.Sigmoid()
-        )
-
-        if channels % 2 == 1:
-            self.single_mlp = nn.Sequential(
-                nn.Linear(1, 1, bias=False),
-                nn.Sigmoid()
-            )
-
-    def forward(self, x):
-        b, c, h, w = x.shape
-
-        x_even = x[:, :self.even_channels, :, :]
-        x1 = x_even[:, 0::2, :, :]
-        x2 = x_even[:, 1::2, :, :]
-
-        z1 = self.avg_pool(x1).view(b, self.half)
-        z2 = self.avg_pool(x2).view(b, self.half)
-
-        w1 = self.mlp1(z1).view(b, self.half, 1, 1)
-        z_cat = torch.cat([z1, z2], dim=1)
-        w2 = self.mlp2(z_cat).view(b, self.half, 1, 1)
-
-        out = torch.empty_like(x_even)
-        out[:, 0::2, :, :] = x1 * w1
-        out[:, 1::2, :, :] = x2 * w2
-
-        if self.channels % 2 == 0:
-            return out
-
-        x_last = x[:, -1:, :, :]
-        z_last = self.avg_pool(x_last).view(b, 1)
-        w_last = self.single_mlp(z_last).view(b, 1, 1, 1)
-        x_last = x_last * w_last
-
-        return torch.cat([out, x_last], dim=1)
-
+        z_a = self.avg_pool(x_a).view(b, self.half) 
+        z_b = self.avg_pool(x_b).view(b, c - self.half) 
+        
+        w_a = self.mlp_a(z_b).view(b, self.half, 1, 1) 
+        w_b = self.mlp_b(z_a).view(b, c - self.half, 1, 1) 
+        
+        out_a = x_a * w_a 
+        out_b = x_b * w_b 
+        
+        out = torch.cat([out_a, out_b], dim=1)
+        
+        b, c, h, w = out.shape
+        out = out.view(b, 2, c // 2, h, w)
+        out = out.transpose(1, 2).contiguous()
+        out = out.view(b, c, h, w)
+        return out
