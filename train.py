@@ -317,7 +317,7 @@ class Trainer:
             f.write(f"Total parameters: {total_params:,}\n")
             f.write(f"Trainable parameters: {trainable_params:,}\n")
             f.write(f"Best validation accuracy: {self.best_val_acc:.6f} (epoch {self.best_epoch+1})\n")
-            f.write(f"Weighted F1 score: {f:.6f}\n")
+            f.write(f"Weighted F1 score: {f1:.6f}\n")
             f.write(f"Total training time: {total_time/3600:.4f} hours\n")
             f.write(f"Final validation accuracy: {val_acc:.6f}\n")
             f.write(f"Final training accuracy: {train_acc:.6f}\n")
