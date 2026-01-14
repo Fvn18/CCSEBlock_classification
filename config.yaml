@@ -1,37 +1,44 @@
 basic: 
-  dataset: "cifar100"   
+  dataset: "imagenet" 
   device: "auto" 
-  num_workers: 4      
-  seed: 42 
-  use_amp: true 
+  num_workers: 8                 
+  use_amp: true                  
+  seed: 42
 
 model: 
-  name: "resnet50"      
-  pretrained: true     
+  name: "resnet50" 
+  pretrained: false               
+  drop_path_rate: 0.05            
 
 data: 
-  root: "E:/data"      
-  train_path: "E:/data/cifar100/train"        
-  val_path: "E:/data/cifar100/test" 
-  img_size: 32         
+  root: "E:/data" 
+  train_path: "E:/data/imagenet/train" 
+  val_path: "E:/data/imagenet/val" 
+  img_size: 224
   grayscale_output_channels: 3 
 
+
 training: 
-  batch_size: 128 
-  epochs: 200          
-  loss_type: "ce"      
-  label_smoothing: 0.1 
-  
-  mixup_prob: 0.5      
+  batch_size: 128
+  epochs: 100  
+  accumulation_steps: 1
+  loss_type: "ce" 
+  label_smoothing: 0.1   
+  patience: 20                 
+
+  mixup_prob: 1.0               
   mixup_alpha: 0.2 
-  cutmix_alpha: 1.0    
+  cutmix_prob: 0.5               
+  cutmix_alpha: 1.0
 
 optimizer: 
-  optimizer: "sgd"     
-  lr: 0.1              
+  optimizer: "adamw" 
+  lr: 0.001                       
   momentum: 0.9 
-  weight_decay: 0.0005  
+  weight_decay: 0.05 
+  nesterov: true                  
 
 scheduler: 
-  scheduler: "cosine"  
+  scheduler: "cosine" 
   warmup_epochs: 5 
+  min_lr: 0.000001                

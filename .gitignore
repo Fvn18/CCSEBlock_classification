@@ -166,6 +166,7 @@ dmypy.json
 # Data directories (usually large) - uncomment if you want to include sample data
 data/
 results/
+experiment_detailed_results.md
 *.pth
 *.pkl
 *.h5

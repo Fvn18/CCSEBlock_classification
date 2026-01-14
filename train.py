@@ -6,7 +6,7 @@ import argparse
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 import numpy as np
 import torch
@@ -17,22 +17,15 @@ from tqdm.auto import tqdm
 from sklearn.metrics import f1_score
 
 from config import get_defaults, load_config
-from utils import set_seed, mixup_data, cutmix_data
+from utils import set_seed, mixup_data, cutmix_data 
 from dataset import load_data
-from model import *
-try:
-    from torchinfo import summary
-except ImportError:
-    summary = None
-
+from model import * 
 
 class Trainer:
     def __init__(self, cfg: Dict[str, Any]) -> None:
         self.config = cfg
         self.device = self._setup_device()
         
-        if self.device.type == 'cuda':
-            torch.backends.cudnn.benchmark = True
             
         self.output_dir = self._create_result_dir()
         self._setup_logging()
@@ -43,6 +36,10 @@ class Trainer:
 
         self.use_amp = cfg["basic"].get("use_amp", False) and self.device.type == "cuda"
         self.scaler = GradScaler() if self.use_amp else None
+        
+        self.accum_steps = cfg["training"].get("accumulation_steps", 1)
+        self.logger.info(f"Using AMP: {self.use_amp}")
+        self.logger.info(f"Gradient Accumulation Steps: {self.accum_steps}")
 
     def _setup_device(self) -> torch.device:
         device_arg = self.config["basic"].get("device", "auto")
@@ -55,7 +52,8 @@ class Trainer:
     def _create_result_dir(self) -> Path:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         model_name = self.config["model"]["name"]
-        dir_name = f"{model_name}_{self.config['basic']['dataset']}_{timestamp}"
+        dataset_name = self.config['basic']['dataset']
+        dir_name = f"{model_name}_{dataset_name}_{timestamp}"
         result_dir = Path("results") / dir_name
         result_dir.mkdir(parents=True, exist_ok=True)
         
@@ -73,35 +71,48 @@ class Trainer:
             handlers=[logging.FileHandler(log_file), logging.StreamHandler()]
         )
         self.logger = logging.getLogger(__name__)
-        self.logger.info(f"Device: {self.device}")
-        self.logger.info(f"Artifacts dir: {self.output_dir}")
 
     def _build_components(self):
+        self.logger.info("Loading Data...")
         self.train_loader = load_data(
-            self.config["data"]["train_path"], self.config["training"]["batch_size"],
-            self.config["basic"]["num_workers"], "train", self.config
+            self.config["data"]["train_path"], 
+            self.config["training"]["batch_size"],
+            self.config["basic"]["num_workers"], 
+            "train", 
+            self.config
         )
         self.val_loader = load_data(
-            self.config["data"]["val_path"], self.config["training"]["batch_size"],
-            self.config["basic"]["num_workers"], "val", self.config
+            self.config["data"]["val_path"], 
+            self.config["training"]["batch_size"],
+            self.config["basic"]["num_workers"], 
+            "val", 
+            self.config
         )
         
         if hasattr(self.train_loader.dataset, 'classes'):
             self.num_classes = len(self.train_loader.dataset.classes)
+        elif hasattr(self.train_loader.dataset, 'targets'):
+             self.num_classes = len(set(self.train_loader.dataset.targets))
         else:
-            self.num_classes = len(set(self.train_loader.dataset.targets))
+             self.num_classes = 1000 
+        
         self.logger.info(f"Num Classes: {self.num_classes}")
 
         self.logger.info(f"Building Model: {self.config['model']['name']}")
         input_channels = self.config["data"].get("grayscale_output_channels", 3)
         
-        model_cls = getattr(sys.modules[__name__], self.config['model']['name'])
+        try:
+            model_cls = getattr(sys.modules['model'], self.config['model']['name'])
+        except AttributeError:
+            model_cls = globals().get(self.config['model']['name'])
+            if model_cls is None:
+                raise ValueError(f"Model {self.config['model']['name']} not found in model.py")
+
         self.model = model_cls(
             num_classes=self.num_classes, 
             input_channels=input_channels, 
             pretrained=self.config["model"].get("pretrained", False)
         )
-
         self.model = self.model.to(self.device)
         
         self.criterion = self._get_loss_fn()
@@ -110,30 +121,41 @@ class Trainer:
 
     def _get_loss_fn(self):
         loss_type = self.config["training"].get("loss_type", "ce")
+        label_smoothing = self.config["training"].get("label_smoothing", 0.0)
+        
+        self.logger.info(f"Loss: {loss_type}, Label Smoothing: {label_smoothing}")
+        
         if loss_type == "ce":
-            return nn.CrossEntropyLoss(label_smoothing=self.config["training"].get("label_smoothing", 0.0))
-        elif loss_type == "sce":
-            from utils import SymmetricCrossEntropy
-            return SymmetricCrossEntropy(
-                num_classes=self.num_classes,
-                alpha=self.config["training"].get("sce_alpha", 0.1),
-                beta=self.config["training"].get("sce_beta", 1.0),
-                label_smoothing=self.config["training"].get("label_smoothing", 0.0)
-            ).to(self.device)
-        else:
-            return nn.CrossEntropyLoss()
+            return nn.CrossEntropyLoss(label_smoothing=label_smoothing)
+        return nn.CrossEntropyLoss()
 
     def _get_optimizer(self):
-        if self.config["optimizer"]["optimizer"] == "adamw":
-            return optim.AdamW(self.model.parameters(), lr=self.config["optimizer"]["lr"], weight_decay=self.config["optimizer"]["weight_decay"])
-        elif self.config["optimizer"]["optimizer"] == "sgd":
-            return optim.SGD(self.model.parameters(), lr=self.config["optimizer"]["lr"], momentum=self.config["optimizer"]["momentum"], weight_decay=self.config["optimizer"]["weight_decay"])
+        opt_name = self.config["optimizer"]["optimizer"].lower()
+        lr = self.config["optimizer"]["lr"]
+        wd = self.config["optimizer"]["weight_decay"]
+        
+        self.logger.info(f"Optimizer: {opt_name}, LR: {lr}, WD: {wd}")
+        
+        if opt_name == "adamw":
+            return optim.AdamW(self.model.parameters(), lr=lr, weight_decay=wd)
+        elif opt_name == "sgd":
+            return optim.SGD(
+                self.model.parameters(), lr=lr, 
+                momentum=self.config["optimizer"].get("momentum", 0.9), 
+                weight_decay=wd,
+                nesterov=self.config["optimizer"].get("nesterov", True)
+            )
         else:
-            return optim.Adam(self.model.parameters(), lr=self.config["optimizer"]["lr"])
+            return optim.Adam(self.model.parameters(), lr=lr)
 
     def _get_scheduler(self):
+        epochs = self.config["training"]["epochs"]
+        warmup = self.config["scheduler"].get("warmup_epochs", 0)
+        
         return optim.lr_scheduler.CosineAnnealingLR(
-            self.optimizer, T_max=self.config["training"]["epochs"], eta_min=1e-6
+            self.optimizer, 
+            T_max=epochs, 
+            eta_min=self.config["scheduler"]["min_lr"]
         )
 
     def train_one_epoch(self, epoch):
@@ -142,35 +164,33 @@ class Trainer:
         correct = 0
         total = 0
         
-        mixup_alpha = self.config["training"].get("mixup_alpha", 0)
-        cutmix_alpha = self.config["training"].get("cutmix_alpha", 0)
-        do_mixup = mixup_alpha > 0 or cutmix_alpha > 0
+        mixup_prob = self.config["training"].get("mixup_prob", 0.0)
+        cutmix_prob = self.config["training"].get("cutmix_prob", 0.0)
+        mixup_alpha = self.config["training"].get("mixup_alpha", 0.0)
+        cutmix_alpha = self.config["training"].get("cutmix_alpha", 0.0)
+        
+        do_mixup = (mixup_alpha > 0 or cutmix_alpha > 0) and (mixup_prob > 0 or cutmix_prob > 0)
 
         pbar = tqdm(self.train_loader, desc=f"Ep {epoch+1}", leave=False)
         
-        for images, labels in pbar:
+        self.optimizer.zero_grad() 
+
+        for i, (images, labels) in enumerate(pbar):
             images, labels = images.to(self.device, non_blocking=True), labels.to(self.device, non_blocking=True)
 
             mixed = False
-            labels_a, labels_b, lam = None, None, 1.0
+            labels_a, labels_b, lam = labels, labels, 1.0
             
-            if do_mixup and torch.rand(1).item() < self.config["training"].get("mixup_prob", 0.5):
-                if cutmix_alpha > 0 and mixup_alpha > 0:
-                    if torch.rand(1).item() < 0.5:
-                        images, labels_a, labels_b, lam = cutmix_data(images, labels, cutmix_alpha, self.device)
-                    else:
-                        images, labels_a, labels_b, lam = mixup_data(images, labels, mixup_alpha, self.device)
-                    mixed = True
-                elif cutmix_alpha > 0:
+            if do_mixup and torch.rand(1).item() < mixup_prob:
+                mixed = True
+                use_cutmix = cutmix_alpha > 0 and (torch.rand(1).item() < cutmix_prob or mixup_alpha == 0)
+                
+                if use_cutmix:
                     images, labels_a, labels_b, lam = cutmix_data(images, labels, cutmix_alpha, self.device)
-                    mixed = True
-                elif mixup_alpha > 0:
+                else:
                     images, labels_a, labels_b, lam = mixup_data(images, labels, mixup_alpha, self.device)
-                    mixed = True
 
-            self.optimizer.zero_grad(set_to_none=True)
-
-            with autocast(enabled=self.use_amp, device_type=self.device.type):
+            with autocast(device_type=self.device.type, enabled=self.use_amp):
                 outputs = self.model(images)
                 
                 if mixed:
@@ -178,25 +198,35 @@ class Trainer:
                 else:
                     loss = self.criterion(outputs, labels)
 
+                loss = loss / self.accum_steps
+
             if self.use_amp:
                 self.scaler.scale(loss).backward()
-                self.scaler.step(self.optimizer)
-                self.scaler.update()
+                
+                if (i + 1) % self.accum_steps == 0:
+                    self.scaler.step(self.optimizer)
+                    self.scaler.update()
+                    self.optimizer.zero_grad()
             else:
                 loss.backward()
-                self.optimizer.step()
+                if (i + 1) % self.accum_steps == 0:
+                    self.optimizer.step()
+                    self.optimizer.zero_grad()
 
+            current_loss = loss.item() * self.accum_steps
             batch_size = images.size(0)
-            running_loss += loss.item() * batch_size
+            running_loss += current_loss * batch_size
             total += batch_size
             
             _, predicted = outputs.max(1)
             if mixed:
-                correct += (lam * predicted.eq(labels_a).sum().float() + (1 - lam) * predicted.eq(labels_b).sum().float()).item()
+                part_a = predicted.eq(labels_a).sum().float()
+                part_b = predicted.eq(labels_b).sum().float()
+                correct += (lam * part_a + (1 - lam) * part_b).item()
             else:
                 correct += predicted.eq(labels).sum().item()
 
-            pbar.set_postfix({"Loss": f"{loss.item():.4f}"})
+            pbar.set_postfix({"Loss": f"{current_loss:.4f}", "Lr": f"{self.optimizer.param_groups[0]['lr']:.2e}"})
 
         return running_loss / total, correct / total
 
@@ -210,7 +240,7 @@ class Trainer:
         for images, labels in self.val_loader:
             images, labels = images.to(self.device, non_blocking=True), labels.to(self.device, non_blocking=True)
             
-            with autocast(enabled=self.use_amp, device_type=self.device.type):
+            with autocast(device_type=self.device.type, enabled=self.use_amp):
                 outputs = self.model(images)
                 loss = self.criterion(outputs, labels)
             
@@ -234,21 +264,21 @@ class Trainer:
         torch.save(state, self.output_dir / "last.pth")
         if is_best:
             torch.save(state, self.output_dir / "best.pth")
-            self.logger.info(f"Saved Best Model: Acc {val_acc:.4f}")
+            self.logger.info(f"Saved Best Model: {val_acc:.4f}")
 
     def run(self):
         self._build_components()
         
         epochs = self.config["training"]["epochs"]
-        self.logger.info(f"Start Training for {epochs} epochs...")
-        
-        self.logger.info(f"{'Epoch':<8} {'Train Loss':<12} {'Train Acc':<10} {'Val Loss':<10} {'Val Acc':<10} {'LR':<12}")
-        self.logger.info("-" * 72)
+        self.logger.info(f"Start Training: {epochs} Epochs")
+        self.logger.info("-" * 90)
+        self.logger.info(f"{'Epoch':<8} {'Train Loss':<12} {'Train Acc':<12} {'Val Loss':<10} {'Val Acc':<10} {'LR':<10} {'Time'}")
+        self.logger.info("-" * 90)
         
         start_time = time.time()
         
         for epoch in range(epochs):
-            epoch_start_time = time.time()
+            epoch_start = time.time()
             
             train_loss, train_acc = self.train_one_epoch(epoch)
             val_loss, val_acc = self.evaluate()
@@ -263,87 +293,25 @@ class Trainer:
             else:
                 self.patience_counter += 1
                 
-            time_elapsed = time.time() - epoch_start_time
+            epoch_time = time.time() - epoch_start
             lr = self.optimizer.param_groups[0]["lr"]
 
             self.logger.info(
                 f"{epoch+1:03d}/{epochs:<4} "
-                f" {train_loss:<12.4f} {train_acc:<10.4f} "
-                f" {val_loss:<10.4f} {val_acc:<10.4f} "
-                f" {lr:<12.6f}"
+                f"{train_loss:<12.4f} {train_acc:<12.4f} "
+                f"{val_loss:<10.4f} {val_acc:<10.4f} "
+                f"{lr:<10.2e} {epoch_time:.0f}s"
             )
             
             self.save_checkpoint(epoch, val_acc, is_best)
             
-            patience = self.config["training"].get("patience", 20)
-            if self.patience_counter >= patience:
+            if self.patience_counter >= self.config["training"].get("patience", 999):
                 self.logger.info(f"Early stopping at epoch {epoch+1}")
                 break
 
         total_time = time.time() - start_time
-        
-        self.model.load_state_dict(torch.load(self.output_dir / "best.pth", map_location=self.device)["state_dict"])
-        self.model.eval()
-        all_labels, all_preds = [], []
-        with torch.no_grad():
-            for images, labels in self.val_loader:
-                images = images.to(self.device)
-                outputs = self.model(images)
-                _, predicted = torch.max(outputs, 1)
-                all_labels.extend(labels.numpy())
-                all_preds.extend(predicted.cpu().numpy())
-        f1 = f1_score(all_labels, all_preds, average="weighted", zero_division=1)
-        
-        total_params = sum(p.numel() for p in self.model.parameters())
-        trainable_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
-        
-        self.logger.info("=" * 72)
-        self.logger.info("Training Summary:")
-        self.logger.info(f"  Model: {self.config['model']['name']}")
-        self.logger.info(f"  Dataset: {self.config['basic']['dataset']}")
-        self.logger.info(f"  Total parameters: {total_params:,}")
-        self.logger.info(f"  Trainable parameters: {trainable_params:,}")
-        self.logger.info(f"  Best validation accuracy: {self.best_val_acc:.6f} (epoch {self.best_epoch+1})")
-        self.logger.info(f"  Weighted F1 score: {f1:.6f}")
-        self.logger.info(f"  Total training time: {total_time/3600:.4f} hours")
-        
-        import json
-        config_path = self.output_dir / "config.json"
-        with open(config_path, 'w') as f:
-            json.dump(self.config, f, indent=2)
-        
-        results_path = self.output_dir / "results.txt"
-        with open(results_path, 'w') as f:
-            f.write("Training Results Summary\n")
-            f.write("=" * 50 + "\n")
-            f.write(f"Model: {self.config['model']['name']}\n")
-            f.write(f"Dataset: {self.config['basic']['dataset']}\n")
-            f.write(f"Total parameters: {total_params:,}\n")
-            f.write(f"Trainable parameters: {trainable_params:,}\n")
-            f.write(f"Best validation accuracy: {self.best_val_acc:.6f} (epoch {self.best_epoch+1})\n")
-            f.write(f"Weighted F1 score: {f1:.6f}\n")
-            f.write(f"Total training time: {total_time/3600:.4f} hours\n")
-            f.write(f"Final validation accuracy: {val_acc:.6f}\n")
-            f.write(f"Final training accuracy: {train_acc:.6f}\n")
-            f.write(f"Final training loss: {train_loss:.6f}\n")
-            f.write(f"Final validation loss: {val_loss:.6f}\n")
-        
-        last_model_path = self.output_dir / "last_model.pth"
-        torch.save({
-            'epoch': self.best_epoch,
-            'state_dict': self.model.state_dict(),
-            'optimizer': self.optimizer.state_dict(),
-            'scheduler': self.scheduler.state_dict(),
-            'best_val_acc': self.best_val_acc,
-        }, last_model_path)
-        
-        self.logger.info("=" * 72)
-        self.logger.info(f"All results saved to: {self.output_dir}")
-        self.logger.info(f"Configuration saved to: {config_path}")
-        self.logger.info(f"Results summary saved to: {results_path}")
-        self.logger.info(f"Best model saved to: {self.output_dir / 'best.pth'}")
-        self.logger.info(f"Last model saved to: {last_model_path}")
-
+        self.logger.info(f"Training Finished. Total Time: {total_time/3600:.2f} Hours")
+        self.logger.info(f"Best Val Acc: {self.best_val_acc:.4f} at Epoch {self.best_epoch+1}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -352,7 +320,8 @@ if __name__ == "__main__":
     
     cfg = load_config(args.config)
     if cfg is None: 
-        cfg = get_defaults()
+        print("Config file not found or empty.")
+        sys.exit(1)
         
     set_seed(cfg["basic"].get("seed", 42))
     trainer = Trainer(cfg)

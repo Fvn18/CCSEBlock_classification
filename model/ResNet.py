@@ -2,10 +2,13 @@ import torch
 import torch.nn as nn
 import torchvision.models as models
 from collections import OrderedDict
-from .SEBlock import SELayer
-from .ECABlock import ECALayer
-from .CCSEBlock import CrossChannelSegmentationExcitationBlock
-from .CoordAttBlock import CoordAtt
+from SEBlock import SELayer
+from ECABlock import ECALayer
+from CCFiLM import CCFiLM
+from SimCCFiLM import SimCCFiLM
+from CoordAttBlock import CoordAtt
+from SimAM import SimAM
+from EMA import EMA
 
 
 class AttentionLayer(nn.Module):
@@ -19,14 +22,22 @@ class AttentionLayer(nn.Module):
             reduction = kwargs.get('reduction', 16)
             self.attention = SELayer(channel, reduction)
         elif self.attention_type == 'eca':
-            # ECA uses automatic kernel size calculation based on channel count
             self.attention = ECALayer(channel)
-        elif self.attention_type == 'ccse':
+        elif self.attention_type == 'ccfilm':
             reduction = kwargs.get('reduction', 16)
-            self.attention = CrossChannelSegmentationExcitationBlock(channel, reduction)
+            self.attention = CCFiLM(channel, reduction)
+        elif self.attention_type == 'simccfilm':
+            reduction = kwargs.get('reduction', 16)
+            self.attention = SimCCFiLM(channel, reduction)
         elif self.attention_type == 'coordatt':
             reduction = kwargs.get('reduction', 32)
             self.attention = CoordAtt(channel, channel, reduction)
+        elif self.attention_type == 'simam':
+            e_lambda = kwargs.get('e_lambda', 1e-4)
+            self.attention = SimAM(e_lambda=e_lambda)
+        elif self.attention_type == 'ema':
+            factor = kwargs.get('factor', 32)
+            self.attention = EMA(channel, factor=factor)
         elif self.attention_type == 'none':
             self.attention = nn.Identity()
         else:
@@ -227,42 +238,85 @@ class ResNet(nn.Module):
             if name.startswith(('fc.', 'layer4.2.attention.', 'layer3.5.attention.')):  # Skip attention layers and final FC
                 continue
                 
-            # Handle different input channel counts
+            # Handle different input channel counts and kernel sizes
             if name == 'conv1.weight':
+                # Original torchvision ResNet uses 7x7 kernel, but ours uses 3x3 kernel
+                # Extract center weights if kernel sizes differ
                 if input_channels == 3 and param.size(1) == 3:
                     # Standard RGB input
-                    own_state[name].copy_(param)
-                    transferred_layers.add(name)
+                    if own_state[name].shape == param.shape:
+                        # Same kernel size, direct copy
+                        own_state[name].copy_(param)
+                        transferred_layers.add(name)
+                    else:
+                        # Different kernel sizes, extract center portion
+                        if param.shape[2] == 7 and own_state[name].shape[2] == 3:  # Pretrained 7x7 -> Our 3x3
+                            center_start = (7 - 3) // 2
+                            center_end = center_start + 3
+                            own_state[name].copy_(param[:, :, center_start:center_end, center_start:center_end])
+                            transferred_layers.add(name)
+                        elif param.shape[2] == 3 and own_state[name].shape[2] == 7:  # Our 7x7 <- Pretrained 3x3
+                            center_start = (7 - 3) // 2
+                            center_end = center_start + 3
+                            own_state[name][:, :, center_start:center_end, center_start:center_end].copy_(param)
+                            transferred_layers.add(name)
+                        else:
+                            # Other size combinations - initialize randomly
+                            continue
                 elif input_channels == 1 and param.size(1) == 3:
-                    # Convert RGB to grayscale by averaging
-                    gray_weight = param.sum(dim=1, keepdim=True) / 3.0
-                    own_state[name][:, :, :, :].copy_(gray_weight)
-                    transferred_layers.add(name)
+                    # Convert RGB to grayscale by averaging, then handle kernel size
+                    gray_param = param.sum(dim=1, keepdim=True) / 3.0
+                    if own_state[name].shape == gray_param.shape:
+                        own_state[name].copy_(gray_param)
+                        transferred_layers.add(name)
+                    else:
+                        # Different kernel sizes for grayscale
+                        if gray_param.shape[2] == 7 and own_state[name].shape[2] == 3:  # Pretrained 7x7 -> Our 3x3
+                            center_start = (7 - 3) // 2
+                            center_end = center_start + 3
+                            own_state[name].copy_(gray_param[:, :, center_start:center_end, center_start:center_end])
+                            transferred_layers.add(name)
+                        elif gray_param.shape[2] == 3 and own_state[name].shape[2] == 7:  # Our 7x7 <- Pretrained 3x3
+                            center_start = (7 - 3) // 2
+                            center_end = center_start + 3
+                            own_state[name][:, :, center_start:center_end, center_start:center_end].copy_(gray_param)
+                            transferred_layers.add(name)
                 elif input_channels == 3 and param.size(1) == 1:
-                    # Convert grayscale to RGB by repeating
-                    rgb_weight = param.repeat(1, 3, 1, 1) / 3.0
-                    own_state[name].copy_(rgb_weight)
-                    transferred_layers.add(name)
+                    # Convert grayscale to RGB by repeating, then handle kernel size
+                    rgb_param = param.repeat(1, 3, 1, 1) / 3.0
+                    if own_state[name].shape == rgb_param.shape:
+                        own_state[name].copy_(rgb_param)
+                        transferred_layers.add(name)
+                    else:
+                        # Different kernel sizes for RGB
+                        if rgb_param.shape[2] == 7 and own_state[name].shape[2] == 3:  # Pretrained 7x7 -> Our 3x3
+                            center_start = (7 - 3) // 2
+                            center_end = center_start + 3
+                            own_state[name].copy_(rgb_param[:, :, center_start:center_end, center_start:center_end])
+                            transferred_layers.add(name)
+                        elif rgb_param.shape[2] == 3 and own_state[name].shape[2] == 7:  # Our 7x7 <- Pretrained 3x3
+                            center_start = (7 - 3) // 2
+                            center_end = center_start + 3
+                            own_state[name][:, :, center_start:center_end, center_start:center_end].copy_(rgb_param)
+                            transferred_layers.add(name)
                 else:
                     # Different channel count - initialize randomly
                     continue
             elif name == 'fc.weight':
-                if num_classes == param.size(0):  # Only copy if output classes match
-                    # Resize to match our output size
-                    if own_state[name].size() == param.size():
-                        own_state[name].copy_(param)
-                        transferred_layers.add(name)
+                if own_state[name].size() == param.size():
+                    # Only copy if output classes match and tensor shapes match
+                    own_state[name].copy_(param)
+                    transferred_layers.add(name)
             elif name == 'fc.bias':
-                if num_classes == param.size(0):  # Only copy if output classes match
-                    if own_state[name].size() == param.size():
-                        own_state[name].copy_(param)
-                        transferred_layers.add(name)
+                if own_state[name].size() == param.size():
+                    # Only copy if output classes match and tensor shapes match
+                    own_state[name].copy_(param)
+                    transferred_layers.add(name)
             else:
-                # Copy other layers directly if they exist in our model
-                if name in own_state:
-                    if own_state[name].size() == param.size():
-                        own_state[name].copy_(param)
-                        transferred_layers.add(name)
+                # Copy other layers directly if they exist in our model and shapes match
+                if name in own_state and own_state[name].size() == param.size():
+                    own_state[name].copy_(param)
+                    transferred_layers.add(name)
         
         print(f"Transferred {len(transferred_layers)} layers from pretrained model")
 
@@ -345,7 +399,7 @@ def se_resnet101(num_classes=1000, input_channels=3, reduction=16, pretrained=Fa
                     attention_type='se', reduction=reduction, pretrained=pretrained)
 
 
-def eca_resnet18(num_classes=1000, input_channels=3):
+def eca_resnet18(num_classes=1000, input_channels=3, pretrained=False):
     """ECA-ResNet-18 model"""
     return resnet18(num_classes=num_classes, input_channels=input_channels, 
                     attention_type='eca', pretrained=pretrained )
@@ -366,25 +420,45 @@ def eca_resnet101(num_classes=1000, input_channels=3, pretrained=False):
                     attention_type='eca', pretrained=pretrained)
 
 
-def ccse_resnet18(num_classes=1000, input_channels=3, reduction=16, pretrained=False):
-    """CCSE-ResNet-18 model"""
+def ccfilm_resnet18(num_classes=1000, input_channels=3, reduction=16, pretrained=False):
+    """CCFiLM-ResNet-18 model"""
     return resnet18(num_classes=num_classes, input_channels=input_channels, 
-                    attention_type='ccse', reduction=reduction, pretrained=pretrained)
+                    attention_type='ccfilm', reduction=reduction, pretrained=pretrained)
 
-def ccse_resnet34(num_classes=1000, input_channels=3, reduction=16, pretrained=False):  
-    """CCSE-ResNet-34 model"""
+def ccfilm_resnet34(num_classes=1000, input_channels=3, reduction=16, pretrained=False):  
+    """CCFiLM-ResNet-34 model"""    
     return resnet34(num_classes=num_classes, input_channels=input_channels, 
-                    attention_type='ccse', reduction=reduction, pretrained=pretrained)
+                    attention_type='ccfilm', reduction=reduction, pretrained=pretrained)
 
-def ccse_resnet50(num_classes=1000, input_channels=3, reduction=16, pretrained=False):
-    """CCSE-ResNet-50 model"""
+def ccfilm_resnet50(num_classes=1000, input_channels=3, reduction=16, pretrained=False):
+    """CCFiLM-ResNet-50 model"""    
     return resnet50(num_classes=num_classes, input_channels=input_channels, 
-                    attention_type='ccse', reduction=reduction, pretrained=pretrained)
+                    attention_type='ccfilm', reduction=reduction, pretrained=pretrained)
 
-def ccse_resnet101(num_classes=1000, input_channels=3, reduction=16, pretrained=False):
-    """CCSE-ResNet-101 model"""
+def ccfilm_resnet101(num_classes=1000, input_channels=3, reduction=16, pretrained=False):
+    """CCFiLM-ResNet-101 model"""
     return resnet101(num_classes=num_classes, input_channels=input_channels, 
-                    attention_type='ccse', reduction=reduction, pretrained=pretrained)
+                    attention_type='ccfilm', reduction=reduction, pretrained=pretrained)
+
+def simccfilm_resnet18(num_classes=1000, input_channels=3, reduction=16, pretrained=False):
+    """SimCCFiLM-ResNet-18 model"""
+    return resnet18(num_classes=num_classes, input_channels=input_channels, 
+                    attention_type='simccfilm', reduction=reduction, pretrained=pretrained)
+
+def simccfilm_resnet34(num_classes=1000, input_channels=3, reduction=16, pretrained=False):  
+    """SimCCFiLM-ResNet-34 model"""
+    return resnet34(num_classes=num_classes, input_channels=input_channels, 
+                    attention_type='simccfilm', reduction=reduction, pretrained=pretrained)
+
+def simccfilm_resnet50(num_classes=1000, input_channels=3, reduction=16, pretrained=False):
+    """SimCCFiLM-ResNet-50 model"""
+    return resnet50(num_classes=num_classes, input_channels=input_channels, 
+                    attention_type='simccfilm', reduction=reduction, pretrained=pretrained)
+
+def simccfilm_resnet101(num_classes=1000, input_channels=3, reduction=16, pretrained=False):
+    """SimCCFiLM-ResNet-101 model"""
+    return resnet101(num_classes=num_classes, input_channels=input_channels, 
+                    attention_type='simccfilm', reduction=reduction, pretrained=pretrained)
 
 def coordatt_resnet18(num_classes=1000, input_channels=3, reduction=32, pretrained=False):  
     """CoordAtt-ResNet-18 model"""
@@ -407,9 +481,51 @@ def coordatt_resnet101(num_classes=1000, input_channels=3, reduction=32, pretrai
                     attention_type='coordatt', reduction=reduction, pretrained=pretrained)
 
 
+def simam_resnet18(num_classes=1000, input_channels=3, e_lambda=1e-4, pretrained=False):
+    """SimAM-ResNet-18 model"""
+    return resnet18(num_classes=num_classes, input_channels=input_channels, 
+                    attention_type='simam', e_lambda=e_lambda, pretrained=pretrained)
+
+def simam_resnet34(num_classes=1000, input_channels=3, e_lambda=1e-4, pretrained=False):
+    """SimAM-ResNet-34 model"""
+    return resnet34(num_classes=num_classes, input_channels=input_channels, 
+                    attention_type='simam', e_lambda=e_lambda, pretrained=pretrained)
+
+def simam_resnet50(num_classes=1000, input_channels=3, e_lambda=1e-4, pretrained=False):
+    """SimAM-ResNet-50 model"""
+    return resnet50(num_classes=num_classes, input_channels=input_channels, 
+                    attention_type='simam', e_lambda=e_lambda, pretrained=pretrained)
+
+def simam_resnet101(num_classes=1000, input_channels=3, e_lambda=1e-4, pretrained=False):
+    """SimAM-ResNet-101 model"""
+    return resnet101(num_classes=num_classes, input_channels=input_channels, 
+                    attention_type='simam', e_lambda=e_lambda, pretrained=pretrained)
+
+
+def ema_resnet18(num_classes=1000, input_channels=3, factor=32, pretrained=False):
+    """EMA-ResNet-18 model"""
+    return resnet18(num_classes=num_classes, input_channels=input_channels, 
+                    attention_type='ema', factor=factor, pretrained=pretrained)
+
+def ema_resnet34(num_classes=1000, input_channels=3, factor=32, pretrained=False):
+    """EMA-ResNet-34 model"""
+    return resnet34(num_classes=num_classes, input_channels=input_channels, 
+                    attention_type='ema', factor=factor, pretrained=pretrained)
+
+def ema_resnet50(num_classes=1000, input_channels=3, factor=32, pretrained=False):
+    """EMA-ResNet-50 model"""
+    return resnet50(num_classes=num_classes, input_channels=input_channels, 
+                    attention_type='ema', factor=factor, pretrained=pretrained)
+
+def ema_resnet101(num_classes=1000, input_channels=3, factor=32, pretrained=False):
+    """EMA-ResNet-101 model"""
+    return resnet101(num_classes=num_classes, input_channels=input_channels, 
+                    attention_type='ema', factor=factor, pretrained=pretrained)
+
+
 if __name__ == "__main__":
     # Test different attention mechanisms
-    attention_types = ['se', 'eca', 'ccse', 'coordatt', 'none']
+    attention_types = ['se', 'eca', 'ccfilm', 'simccfilm', 'coordatt', 'simam', 'ema', 'none']
     
     for attn_type in attention_types:
         print(f"\nTesting {attn_type.upper()}-ResNet-18:")
@@ -418,10 +534,14 @@ if __name__ == "__main__":
                 model = se_resnet18(num_classes=7, input_channels=1, reduction=16)
             elif attn_type == 'eca':
                 model = eca_resnet18(num_classes=7, input_channels=1)
-            elif attn_type == 'ccse':
-                model = ccse_resnet18(num_classes=7, input_channels=1, reduction=16)
+            elif attn_type == 'ccfilm':
+                model = ccfilm_resnet18(num_classes=7, input_channels=1, reduction=16)
             elif attn_type == 'coordatt':
                 model = coordatt_resnet18(num_classes=7, input_channels=1, reduction=32)
+            elif attn_type == 'simam':
+                model = simam_resnet18(num_classes=7, input_channels=1, e_lambda=1e-4)
+            elif attn_type == 'ema':
+                model = ema_resnet18(num_classes=7, input_channels=1, factor=32)
             else:
                 model = resnet18(num_classes=7, input_channels=1, attention_type=attn_type)
             
